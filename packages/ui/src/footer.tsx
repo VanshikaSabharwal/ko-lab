@@ -29,7 +29,7 @@ const Footer = () => {
             Contact Us
           </Link>
           <Link
-            href="https://github.com/VanshikaSabharwal/co-lab"
+            href="https://github.com/VanshikaSabharwal/ko-lab"
             target="_blank"
             className="text-sm hover:text-blue-400 transition-colors duration-300"
           >

@@ -20,7 +20,7 @@
 //   await transporter.sendMail({
 //     from: process.env.EMAIL_USER,
 //     to: email,
-//     subject: "OTP verification for Co-lab",
+//     subject: "OTP verification for ko-lab",
 //     text: `Your OTP is ${otpNum}`,
 //   });
 

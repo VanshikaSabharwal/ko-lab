@@ -63,7 +63,7 @@ A real-time collaborative code editor with group workspaces, GitHub integration,
 ## Project Structure
 
 ```
-co-lab/
+ko-lab/
 ├── apps/
 │   ├── web/                  # Next.js frontend + API routes
 │   │   ├── app/

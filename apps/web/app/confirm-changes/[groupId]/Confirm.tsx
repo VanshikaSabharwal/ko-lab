@@ -12,6 +12,7 @@ interface GroupProps {
 interface DraftFile {
   path: string;
   content?: string; // plain text, hydrated from the author's draft clone
+  userId?: string; // author of the draft (owners see everyone's drafts)
 }
 
 interface ChangeRequest {
@@ -182,7 +183,7 @@ const Confirm = ({ group }: GroupProps) => {
         if (draftsRes.ok) {
           const data = await draftsRes.json();
           const list: DraftFile[] = Array.isArray(data)
-            ? data.map((f: any) => ({ path: f.path, content: f.content }))
+            ? data.map((f: any) => ({ path: f.path, content: f.content, userId: f.userId }))
             : [];
           setDrafts(list);
           setActiveFiles(list);
@@ -289,6 +290,10 @@ const Confirm = ({ group }: GroupProps) => {
     if (files.length) loadDiff(files[0]!.path, files);
   };
 
+  // Drafts the current user can submit as a change request. Members see only
+  // their own; owners see everyone's in the review diff, so filter to own.
+  const myDrafts = userId ? drafts.filter((d) => d.userId === userId) : [];
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-900">
@@ -302,35 +307,34 @@ const Confirm = ({ group }: GroupProps) => {
       <div className="flex-none space-y-4 bg-gray-800 p-4">
         <h2 className="text-lg font-bold">Change Requests</h2>
 
-        {/* Member: submit drafts as a change request */}
-        {!isOwner && (
+        {/* Submit your own drafts as a change request */}
+        {myDrafts.length > 0 ? (
           <div className="rounded-lg border border-gray-700 p-3">
-            {drafts.length > 0 ? (
-              <>
-                <p className="mb-2 text-sm text-gray-300">
-                  You have {drafts.length} changed file{drafts.length > 1 ? "s" : ""} ready to submit.
-                </p>
-                <div className="flex gap-2">
-                  <input
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="Describe your change (becomes the PR title)…"
-                    className="flex-1 rounded border border-gray-300 bg-white p-2 text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
-                  />
-                  <button
-                    onClick={submitChangeRequest}
-                    disabled={busyId === "submit" || !title.trim()}
-                    className="rounded bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                  >
-                    {busyId === "submit" ? "Submitting…" : "Submit change request"}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <p className="text-sm text-gray-400">
-                No pending changes. Edit files in the code editor, then come back here to submit.
-              </p>
-            )}
+            <p className="mb-2 text-sm text-gray-300">
+              You have {myDrafts.length} changed file
+              {myDrafts.length > 1 ? "s" : ""} ready to submit.
+            </p>
+            <div className="flex gap-2">
+              <input
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Describe your change (becomes the PR title)…"
+                className="flex-1 rounded border border-gray-300 bg-white p-2 text-gray-900 placeholder:text-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:placeholder:text-gray-500"
+              />
+              <button
+                onClick={submitChangeRequest}
+                disabled={busyId === "submit" || !title.trim()}
+                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {busyId === "submit" ? "Submitting…" : "Submit change request"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-gray-700 p-3">
+            <p className="text-sm text-gray-400">
+              No pending changes. Edit files in the code editor, then come back here to submit.
+            </p>
           </div>
         )}
 

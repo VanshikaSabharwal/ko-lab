@@ -7,10 +7,10 @@ async function main() {
 
   // Create a test user if not exists
   const user = await prisma.user.upsert({
-    where: { email: "test-call@co-lab.test" },
+    where: { email: "test-call@ko-lab.test" },
     update: {},
     create: {
-      email: "test-call@co-lab.test",
+      email: "test-call@ko-lab.test",
       name: "Test Call User",
     },
   });

@@ -1,5 +1,5 @@
 {
-  "name": "co-lab",
+  "name": "ko-lab",
   "private": true,
   "scripts": {
     "start": "turbo start",

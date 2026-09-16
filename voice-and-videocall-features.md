@@ -744,7 +744,7 @@ MINIO_BUCKET=call-recordings
 
 # TURN (for NAT traversal)
 TURN_DOMAIN=yourdomain.com
-TURN_USER=co-lab-turn
+TURN_USER=ko-lab-turn
 TURN_PASS=turn-secret-password
 ```
 
