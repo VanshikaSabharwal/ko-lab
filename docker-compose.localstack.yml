@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   localstack:
     image: localstack/localstack:latest
@@ -7,6 +5,7 @@ services:
     ports:
       - "4566:4566"
     environment:
+      LOCALSTACK_AUTH_TOKEN: "${LOCALSTACK_AUTH_TOKEN}"
       SERVICES: "s3"
       DEBUG: "${LOCALSTACK_DEBUG:-0}"
       PERSISTENCE: "1"

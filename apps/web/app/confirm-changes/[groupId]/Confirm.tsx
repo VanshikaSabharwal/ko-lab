@@ -11,7 +11,7 @@ interface GroupProps {
 
 interface DraftFile {
   path: string;
-  content?: string; // base64
+  content?: string; // plain text, hydrated from the author's draft clone
 }
 
 interface ChangeRequest {
@@ -200,7 +200,7 @@ const Confirm = ({ group }: GroupProps) => {
   const loadDiff = async (path: string, fileSet: DraftFile[]) => {
     setSelectedPath(path);
     const file = fileSet.find((f) => f.path === path);
-    const modified = file?.content ? safeAtob(file.content) : "";
+    const modified = file?.content || "";
 
     let original = "";
     try {

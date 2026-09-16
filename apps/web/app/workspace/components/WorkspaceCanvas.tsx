@@ -69,15 +69,22 @@ interface WorkspaceCanvasProps {
 // drawer — tapping the backdrop also works, but this is more discoverable.
 function DrawerClose({ onClick, side }: { onClick: () => void; side: "left" | "right" }) {
   return (
-    <button
-      onClick={onClick}
-      aria-label="Close panel"
-      className={`absolute top-2 z-10 rounded-full bg-gray-200 p-1.5 text-gray-600 dark:bg-gray-700 dark:text-gray-300 md:hidden ${
-        side === "left" ? "right-2" : "left-2"
+    // Sits in its own bar rather than floating over the panel: absolutely
+    // positioning it on top meant the ✕ overlapped whatever the panel rendered
+    // in its top corner, since no panel reserves space for it.
+    <div
+      className={`absolute inset-x-0 top-0 z-10 flex bg-gray-50/95 px-2 py-1.5 backdrop-blur dark:bg-gray-800/95 md:hidden ${
+        side === "left" ? "justify-end" : "justify-start"
       }`}
     >
-      <X size={14} />
-    </button>
+      <button
+        onClick={onClick}
+        aria-label="Close panel"
+        className="rounded-full bg-gray-200 p-1.5 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+      >
+        <X size={14} />
+      </button>
+    </div>
   );
 }
 

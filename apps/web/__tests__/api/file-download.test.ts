@@ -1,18 +1,8 @@
 /**
- * The download route exists because `<a download>` is ignored on cross-origin
- * links — pointing at raw.githubusercontent.com navigated instead of saving.
- * These tests pin the headers that make a browser actually write a file.
+ * The download route proxies raw file bytes from the git workspace service
+ * so the browser can save the file with a Content-Disposition attachment.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-
-vi.mock("../../app/lib/prisma", () => ({
-  default: { group: { findUnique: vi.fn() } },
-}));
-
-vi.mock("../../app/lib/encryption", () => ({
-  decrypt: vi.fn((v: string) => v),
-  extractRepoName: vi.fn((v: string) => v),
-}));
 
 vi.mock("../../app/lib/apiAuth", () => ({
   getSessionUser: vi.fn(),
@@ -21,47 +11,33 @@ vi.mock("../../app/lib/apiAuth", () => ({
   forbidden: () => new Response(null, { status: 403 }),
 }));
 
+vi.mock("../../app/lib/gitClient", () => ({
+  resolveBranch: vi.fn(async (_groupId: string, ref?: string | null) => ref ?? "main"),
+  readFileRawBuffer: vi.fn(),
+}));
+
 import { GET } from "../../app/api/file-download/route";
-import prisma from "../../app/lib/prisma";
 import { getSessionUser, isGroupMember } from "../../app/lib/apiAuth";
+import { resolveBranch, readFileRawBuffer } from "../../app/lib/gitClient";
 
-function request(path: string, group = "g1"): Request {
-  return new Request(
-    `http://localhost:3000/api/file-download?group=${group}&path=${encodeURIComponent(path)}`,
-  );
+function request(path: string, group = "g1", ref?: string): Request {
+  const params = new URLSearchParams({ group, path });
+  if (ref) params.set("ref", ref);
+  return new Request(`http://localhost:3000/api/file-download?${params.toString()}`);
 }
 
-function mockUpstream(opts: { ok?: boolean; status?: number; type?: string } = {}) {
-  const captured: { headers?: Record<string, string> } = {};
-  global.fetch = vi.fn(async (_url: string, init?: RequestInit) => {
-    captured.headers = init?.headers as Record<string, string>;
-    return {
-      ok: opts.ok ?? true,
-      status: opts.status ?? 200,
-      body: opts.ok === false ? null : new ReadableStream(),
-      headers: {
-        get: (h: string) =>
-          h.toLowerCase() === "content-type" ? (opts.type ?? null) : null,
-      },
-    };
-  }) as unknown as typeof fetch;
-  return captured;
-}
+const SAMPLE_BYTES = Buffer.from("file content here");
 
 beforeEach(() => {
   vi.clearAllMocks();
   (getSessionUser as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (isGroupMember as ReturnType<typeof vi.fn>).mockResolvedValue(true);
-  (prisma.group.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
-    githubRepo: "repo",
-    ownerName: "owner",
-    githubAccessToken: "token",
-  });
+  (resolveBranch as ReturnType<typeof vi.fn>).mockResolvedValue("main");
+  (readFileRawBuffer as ReturnType<typeof vi.fn>).mockResolvedValue(SAMPLE_BYTES);
 });
 
 describe("GET /api/file-download", () => {
   it("sends Content-Disposition: attachment so the browser saves the file", async () => {
-    mockUpstream();
     const res = await GET(request("img/photo.jpg"));
 
     const disposition = res.headers.get("content-disposition") ?? "";
@@ -69,14 +45,7 @@ describe("GET /api/file-download", () => {
     expect(disposition).toContain('filename="photo.jpg"');
   });
 
-  it("asks GitHub for raw bytes rather than the base64 envelope", async () => {
-    const captured = mockUpstream();
-    await GET(request("a.bin"));
-    expect(captured.headers?.Accept).toBe("application/vnd.github.raw");
-  });
-
   it("neutralises quotes in a filename so the header can't be broken", async () => {
-    mockUpstream();
     const res = await GET(request('weird".name.txt'));
     const disposition = res.headers.get("content-disposition") ?? "";
     // The raw quote must not survive into the quoted string.
@@ -84,49 +53,35 @@ describe("GET /api/file-download", () => {
   });
 
   it("carries a non-ASCII name in filename*", async () => {
-    mockUpstream();
     const res = await GET(request("café.txt"));
     const disposition = res.headers.get("content-disposition") ?? "";
     expect(disposition).toContain("filename*=UTF-8''");
     expect(disposition).toContain(encodeURIComponent("café.txt"));
   });
 
-  it("falls back to a type guess when GitHub sends none", async () => {
-    mockUpstream({ type: undefined });
+  it("sets Content-Type from extension", async () => {
     const res = await GET(request("logo.png"));
     expect(res.headers.get("content-type")).toBe("image/png");
   });
 
+  it("defaults to application/octet-stream for unknown types", async () => {
+    const res = await GET(request("file.unknown"));
+    expect(res.headers.get("content-type")).toBe("application/octet-stream");
+  });
+
   it("does not cache private file bytes", async () => {
-    mockUpstream();
     const res = await GET(request("secret.env"));
     expect(res.headers.get("cache-control")).toContain("no-store");
   });
 
-  it("passes a branch ref through to GitHub", async () => {
-    let url = "";
-    global.fetch = vi.fn(async (u: string) => {
-      url = u;
-      return {
-        ok: true,
-        status: 200,
-        body: new ReadableStream(),
-        headers: { get: () => null },
-      };
-    }) as unknown as typeof fetch;
-
-    await GET(
-      new Request(
-        "http://localhost:3000/api/file-download?group=g1&path=a.txt&ref=dev",
-      ),
-    );
-    expect(url).toContain("ref=dev");
+  it("passes a branch ref through to resolveBranch", async () => {
+    await GET(request("a.txt", "g1", "develop"));
+    expect(resolveBranch).toHaveBeenCalledWith("g1", "develop");
   });
 
-  it("404s a missing file rather than streaming an error page", async () => {
-    mockUpstream({ ok: false, status: 404 });
-    const res = await GET(request("nope.txt"));
-    expect(res.status).toBe(404);
+  it("returns the buffer with correct Content-Length", async () => {
+    const res = await GET(request("a.txt"));
+    expect(res.headers.get("content-length")).toBe(String(SAMPLE_BYTES.byteLength));
   });
 
   it("refuses a caller who isn't a group member", async () => {

@@ -787,7 +787,7 @@ export default function Editor({ github, group }: CodeProps) {
           name: fileName,
           path: filePath,
           userId,
-          content: btoa(fileContent),
+          content: fileContent,
           group,
           baseSha,
         }),

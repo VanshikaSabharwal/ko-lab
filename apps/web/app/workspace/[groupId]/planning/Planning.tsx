@@ -10,14 +10,19 @@ import WorkspaceTopBar from "../../components/WorkspaceTopBar";
 import TaskBoard from "./TaskBoard";
 import TaskTimeline from "./TaskTimeline";
 import TaskSheet from "./TaskSheet";
+import TaskList from "./TaskList";
+import TaskWorkflow from "./TaskWorkflow";
 import CreateTaskDialog from "./CreateTaskDialog";
-import { positionForMove } from "../../lib/position";
+import CreateMilestoneDialog from "./CreateMilestoneDialog";
+import WorkspaceDetailsPanel from "./WorkspaceDetailsPanel";
+import { PanelRight } from "lucide-react";
 
 interface PlanningProps {
   groupId: string;
 }
 
-type View = "board" | "timeline";
+const VIEWS = ["workflow", "timeline", "list", "board"] as const;
+type View = (typeof VIEWS)[number];
 
 export default function Planning({ groupId }: PlanningProps) {
   const { data: session } = useSession();
@@ -29,6 +34,9 @@ export default function Planning({ groupId }: PlanningProps) {
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   // Column the create dialog opens on; null when the dialog is closed.
   const [creatingIn, setCreatingIn] = useState<string | null>(null);
+  const [creatingMilestone, setCreatingMilestone] = useState(false);
+  // Details panel is docked from xl up and a drawer below that.
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   const board = usePlanningData({ groupId, userId });
 
@@ -64,6 +72,18 @@ export default function Planning({ groupId }: PlanningProps) {
     () => (matches ? board.tasks.filter((t) => matches.has(t.id)) : board.tasks),
     [matches, board.tasks],
   );
+
+  // Task id → milestone name. The status pill on a card is its milestone, so it
+  // always matches the milestone list rather than being a separate field.
+  const milestoneNames = useMemo(() => {
+    const byId = new Map(board.milestones.map((m) => [m.id, m.title]));
+    const out = new Map<string, string>();
+    for (const task of board.tasks) {
+      const name = task.milestoneId ? byId.get(task.milestoneId) : undefined;
+      if (name) out.set(task.id, name);
+    }
+    return out;
+  }, [board.milestones, board.tasks]);
 
   const progress = useMemo(
     () => boardProgress(board.columns, board.tasks),
@@ -124,13 +144,15 @@ export default function Planning({ groupId }: PlanningProps) {
         />
 
         <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-3 py-2 dark:border-gray-800 sm:px-4">
-          <div className="flex rounded-md border border-gray-200 bg-gray-50 p-0.5 text-xs dark:border-gray-800 dark:bg-gray-900">
-            {(["board", "timeline"] as const).map((v) => (
+          {/* Four tabs don't fit a phone width, so the strip scrolls rather
+              than wrapping and pushing the board down. */}
+          <div className="flex shrink-0 overflow-x-auto rounded-md border border-gray-200 bg-gray-50 p-0.5 text-xs dark:border-gray-800 dark:bg-gray-900">
+            {VIEWS.map((v) => (
               <button
                 key={v}
                 onClick={() => setView(v)}
                 className={cn(
-                  "rounded px-3 py-1 capitalize transition-colors",
+                  "shrink-0 rounded px-3 py-1 capitalize transition-colors",
                   view === v
                     ? "bg-blue-600 text-white"
                     : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white",
@@ -141,14 +163,32 @@ export default function Planning({ groupId }: PlanningProps) {
             ))}
           </div>
 
-          {query && (
-            <span className="text-xs text-gray-500 dark:text-gray-400">
-              {visibleTasks.length} match{visibleTasks.length === 1 ? "" : "es"}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {query && (
+              <span className="text-xs text-gray-500 dark:text-gray-400">
+                {visibleTasks.length} match{visibleTasks.length === 1 ? "" : "es"}
+              </span>
+            )}
+            <button
+              onClick={() => setDetailsOpen((v) => !v)}
+              aria-label="Toggle workspace details"
+              aria-expanded={detailsOpen}
+              className={cn(
+                "rounded p-1.5 xl:hidden",
+                detailsOpen
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800",
+              )}
+            >
+              <PanelRight size={16} />
+            </button>
+          </div>
         </div>
 
-        <main className="flex-1 overflow-hidden">
+        {/* Row, not column: the details panel docks beside the view. min-h-0
+            lets the view own its own scrolling instead of stretching the row. */}
+        <div className="flex min-h-0 flex-1">
+        <main className="min-w-0 flex-1 overflow-hidden">
           {!board.loaded ? (
             <p className="p-6 text-sm text-gray-400">Loading board…</p>
           ) : view === "board" ? (
@@ -156,6 +196,7 @@ export default function Planning({ groupId }: PlanningProps) {
               columns={board.columns}
               tasksByColumn={visibleByColumn}
               members={board.membersById}
+              milestoneNames={milestoneNames}
               searching={Boolean(query)}
               onAddColumn={handleAddColumn}
               onRenameColumn={(id, title) => board.updateColumn(id, { title })}
@@ -165,16 +206,81 @@ export default function Planning({ groupId }: PlanningProps) {
               onDeleteTask={board.deleteTask}
               onMoveTask={handleMoveTask}
             />
-          ) : (
+          ) : view === "timeline" ? (
             <TaskTimeline
               tasks={visibleTasks}
               columns={board.columns}
               members={board.membersById}
               onOpenTask={(t) => setOpenTaskId(t.id)}
             />
+          ) : view === "list" ? (
+            <TaskList
+              tasks={visibleTasks}
+              columns={board.columns}
+              milestones={board.milestones}
+              members={board.membersById}
+              onOpenTask={(t) => setOpenTaskId(t.id)}
+            />
+          ) : (
+            <TaskWorkflow
+              tasks={visibleTasks}
+              columns={board.columns}
+              milestones={board.milestones}
+              members={board.membersById}
+              dependencies={board.dependencies}
+              onOpenTask={(t) => setOpenTaskId(t.id)}
+              onConnectTasks={board.addDependency}
+              onDisconnectTasks={board.removeDependency}
+              onMoveTask={board.moveTaskOnCanvas}
+            />
           )}
         </main>
+
+        {/* Docked from xl up. */}
+        <div className="hidden w-72 shrink-0 xl:block">
+          <WorkspaceDetailsPanel
+            groupId={groupId}
+            groupName={board.groupName}
+            columns={board.columns}
+            tasks={board.tasks}
+            milestones={board.milestones}
+            members={board.members}
+            onAddTask={() => setCreatingIn(board.columns[0]?.id ?? null)}
+            onAddMilestone={() => setCreatingMilestone(true)}
+          />
+        </div>
+        </div>
       </div>
+
+      {/* Below xl the same panel is a drawer, so it never squeezes the board. */}
+      {detailsOpen && (
+        <>
+          <div
+            onClick={() => setDetailsOpen(false)}
+            className="fixed inset-0 z-30 bg-black/40 xl:hidden"
+            aria-hidden
+          />
+          <div className="fixed inset-y-0 right-0 z-40 w-72 max-w-[85vw] xl:hidden">
+            <WorkspaceDetailsPanel
+              groupId={groupId}
+              groupName={board.groupName}
+              columns={board.columns}
+              tasks={board.tasks}
+              milestones={board.milestones}
+              members={board.members}
+              onAddTask={() => {
+                setDetailsOpen(false);
+                setCreatingIn(board.columns[0]?.id ?? null);
+              }}
+              onAddMilestone={() => {
+                setDetailsOpen(false);
+                setCreatingMilestone(true);
+              }}
+              onClose={() => setDetailsOpen(false)}
+            />
+          </div>
+        </>
+      )}
 
       {creatingIn && (
         <CreateTaskDialog
@@ -183,6 +289,13 @@ export default function Planning({ groupId }: PlanningProps) {
           defaultColumnId={creatingIn}
           onCreate={board.addTask}
           onClose={() => setCreatingIn(null)}
+        />
+      )}
+
+      {creatingMilestone && (
+        <CreateMilestoneDialog
+          onCreate={board.addMilestone}
+          onClose={() => setCreatingMilestone(false)}
         />
       )}
 

@@ -13,6 +13,8 @@ import { cn } from "../../../lib/utils";
 interface TaskCardProps {
   task: PlanningTask;
   members: Map<string, AvatarUser>;
+  /** Milestone name for the status pill; omitted when the task has none. */
+  milestoneName?: string | null;
   onOpen: () => void;
   onDelete: () => void;
 }
@@ -31,7 +33,13 @@ function isOverdue(iso: string): boolean {
   return iso < today;
 }
 
-export default function TaskCard({ task, members, onOpen, onDelete }: TaskCardProps) {
+export default function TaskCard({
+  task,
+  members,
+  milestoneName,
+  onOpen,
+  onDelete,
+}: TaskCardProps) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
   });
@@ -79,8 +87,14 @@ export default function TaskCard({ task, members, onOpen, onDelete }: TaskCardPr
         </button>
       </div>
 
-      {task.priority && (
-        <div className="mt-1.5 pl-5">
+      {(task.priority || milestoneName) && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 pl-5">
+          {milestoneName && (
+            <span className="max-w-full truncate rounded bg-blue-500/10 px-1.5 py-0.5 text-[10px] font-medium text-blue-600 dark:text-blue-400">
+              {milestoneName}
+            </span>
+          )}
+          {task.priority && (
           <span
             className={cn(
               "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium",
@@ -93,6 +107,7 @@ export default function TaskCard({ task, members, onOpen, onDelete }: TaskCardPr
             />
             {PRIORITY_META[task.priority].label}
           </span>
+          )}
         </div>
       )}
 

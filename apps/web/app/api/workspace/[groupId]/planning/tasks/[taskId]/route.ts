@@ -30,6 +30,10 @@ const patchTask = z
     priority: priorityEnum.nullable().optional(),
     milestoneId: z.string().nullable().optional(),
     assigneeIds: z.array(z.string()).max(20).optional(),
+    // Workflow canvas position. Finite-checked because JSON allows NaN through
+    // some clients, and a NaN coordinate renders a node at an unreachable spot.
+    flowX: z.number().finite().nullable().optional(),
+    flowY: z.number().finite().nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, "No fields to update");
 
@@ -97,6 +101,8 @@ export async function PATCH(req: Request, { params }: Params) {
         ...(body.color !== undefined && { color: body.color }),
         ...(body.priority !== undefined && { priority: body.priority }),
         ...(body.milestoneId !== undefined && { milestoneId: body.milestoneId }),
+        ...(body.flowX !== undefined && { flowX: body.flowX }),
+        ...(body.flowY !== undefined && { flowY: body.flowY }),
       },
       select: TASK_SELECT,
     });

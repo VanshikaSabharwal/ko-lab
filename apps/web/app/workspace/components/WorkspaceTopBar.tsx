@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useTheme } from "next-themes";
@@ -80,6 +80,10 @@ export default function WorkspaceTopBar({
   const { data: session } = useSession();
   const { resolvedTheme, setTheme } = useTheme();
   const searchRef = useRef<HTMLInputElement>(null);
+  // Below lg: the search box is collapsed behind an icon — the top bar has no
+  // room for it there. Opening it is what makes ⌘K reachable on small screens,
+  // where the input previously wasn't rendered at all.
+  const [searchOpen, setSearchOpen] = useState(false);
 
   // ⌘K / Ctrl+K focuses search. Not a command palette — cmdk isn't installed,
   // and a filter over the loaded board is what this page actually needs.
@@ -87,7 +91,14 @@ export default function WorkspaceTopBar({
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        searchRef.current?.focus();
+        setSearchOpen(true);
+        // Wait a frame so the input exists before focusing it when it was
+        // collapsed a moment ago.
+        requestAnimationFrame(() => searchRef.current?.focus());
+      }
+      if (e.key === "Escape" && document.activeElement === searchRef.current) {
+        searchRef.current?.blur();
+        setSearchOpen(false);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -144,7 +155,7 @@ export default function WorkspaceTopBar({
         </span>
       </nav>
 
-      <div className="relative hidden lg:block">
+      <div className={cn("relative", searchOpen ? "block w-full order-last lg:order-none lg:w-auto" : "hidden lg:block")}>
         <Search
           size={14}
           className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
@@ -154,12 +165,24 @@ export default function WorkspaceTopBar({
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search tasks…"
-          className="w-56 rounded-md border border-gray-200 bg-gray-50 py-1.5 pl-8 pr-12 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-blue-500 dark:border-gray-800 dark:bg-gray-900 dark:text-white"
+          className="w-full rounded-md border border-gray-200 lg:w-56 bg-gray-50 py-1.5 pl-8 pr-12 text-sm text-gray-900 outline-none placeholder:text-gray-400 focus:border-blue-500 dark:border-gray-800 dark:bg-gray-900 dark:text-white"
         />
         <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-gray-200 px-1 py-0.5 font-mono text-[10px] text-gray-400 dark:border-gray-700">
           ⌘K
         </kbd>
       </div>
+
+      <button
+        onClick={() => {
+          setSearchOpen((v) => !v);
+          requestAnimationFrame(() => searchRef.current?.focus());
+        }}
+        aria-label="Search tasks"
+        aria-expanded={searchOpen}
+        className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 lg:hidden"
+      >
+        <Search size={16} />
+      </button>
 
       <div className="flex shrink-0 items-center gap-2">
         {presentMembers.length > 0 && (

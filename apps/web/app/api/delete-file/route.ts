@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import prisma from "../../lib/prisma";
 import { getSessionUser, unauthorized, requireCodeAccess } from "../../lib/apiAuth";
 import { getDefaultHeadSha } from "../../lib/vcs";
+import { resolveBranch } from "../../lib/gitClient";
+import { deleteDraft, restoreDraft } from "../../lib/draftStore";
 
 /**
  * Stage a file deletion.
@@ -35,19 +37,21 @@ export async function POST(req: Request) {
       // A missing sha isn't fatal — the CR flow falls back to the branch head.
     }
 
+    // Drop the file from the user's draft clone so previews stop showing it.
+    await deleteDraft(group, me.id, path);
+
     const staged = await prisma.modifiedFiles.upsert({
       where: { userId_groupId_path: { userId: me.id, groupId: group, path } },
       update: {
         deleted: true,
-        // Content is irrelevant for a deletion but the column is required.
-        content: "",
+        content: null,
         updatedAt: new Date(),
         modifiedById: me.id,
       },
       create: {
         name,
         path,
-        content: "",
+        content: null,
         deleted: true,
         userId: me.id,
         groupId: group,
@@ -76,6 +80,11 @@ export async function DELETE(req: Request) {
 
   const gate = await requireCodeAccess(group, me.id);
   if (!gate.ok) return gate.res;
+
+  // Put the original back into the draft clone so the draft workspace mirrors
+  // the DB again.
+  const branch = await resolveBranch(group);
+  await restoreDraft(group, me.id, branch, path);
 
   // Only drop the row if it is a staged deletion — an edit draft at the same
   // path is real work and must not be discarded by an undo of something else.

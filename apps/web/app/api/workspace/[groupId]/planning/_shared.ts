@@ -132,6 +132,9 @@ export interface SerializedTask {
   priority: "LOW" | "MEDIUM" | "HIGH" | null;
   milestoneId: string | null;
   assigneeIds: string[];
+  /** Workflow canvas coordinates. Null until the task is first dragged. */
+  flowX: number | null;
+  flowY: number | null;
 }
 
 type TaskRow = {
@@ -146,6 +149,8 @@ type TaskRow = {
   priority: "LOW" | "MEDIUM" | "HIGH" | null;
   milestoneId: string | null;
   assignees?: { userId: string }[];
+  flowX: number | null;
+  flowY: number | null;
 };
 
 export function serializeTask(task: TaskRow): SerializedTask {
@@ -161,6 +166,8 @@ export function serializeTask(task: TaskRow): SerializedTask {
     priority: task.priority,
     milestoneId: task.milestoneId,
     assigneeIds: (task.assignees ?? []).map((a) => a.userId),
+    flowX: task.flowX,
+    flowY: task.flowY,
   };
 }
 
@@ -201,4 +208,50 @@ export const TASK_SELECT = {
   priority: true,
   milestoneId: true,
   assignees: { select: { userId: true } },
+  flowX: true,
+  flowY: true,
 } as const;
+
+// ── Dependencies ────────────────────────────────────────────────────────
+
+export interface SerializedDependency {
+  id: string;
+  blockerId: string;
+  dependentId: string;
+}
+
+/**
+ * Would adding blocker→dependent close a loop?
+ *
+ * Walks the existing edges forward from `dependentId`: if `blockerId` is
+ * reachable, then blocker already depends (transitively) on dependent, and the
+ * new edge would make each side wait for the other. Rejected at the API rather
+ * than tolerated, because the Workflow layout and any later schedule ordering
+ * both assume an acyclic graph and would not terminate on one.
+ */
+export function wouldCreateCycle(
+  edges: { blockerId: string; dependentId: string }[],
+  blockerId: string,
+  dependentId: string,
+): boolean {
+  // blocker -> [dependents]
+  const next = new Map<string, string[]>();
+  for (const e of edges) {
+    const list = next.get(e.blockerId);
+    if (list) list.push(e.dependentId);
+    else next.set(e.blockerId, [e.dependentId]);
+  }
+
+  const seen = new Set<string>();
+  const stack = [dependentId];
+  while (stack.length > 0) {
+    const id = stack.pop()!;
+    if (id === blockerId) return true;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const child of next.get(id) ?? []) {
+      if (!seen.has(child)) stack.push(child);
+    }
+  }
+  return false;
+}

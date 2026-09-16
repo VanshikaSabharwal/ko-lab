@@ -7,8 +7,6 @@ import {
   LayoutGrid,
   KanbanSquare,
   ListTodo,
-  Calendar,
-  FolderOpen,
   Settings,
   MessageSquareHeart,
   LogOut,
@@ -46,8 +44,6 @@ const NAV = [
     href: (g: string) => `/workspace/${g}/planning`,
   },
   { key: "tasks", label: "Tasks", icon: ListTodo, href: null },
-  { key: "calendar", label: "Calendar", icon: Calendar, href: null },
-  { key: "files", label: "Files", icon: FolderOpen, href: null },
   { key: "settings", label: "Settings", icon: Settings, href: null },
 ] as const;
 
@@ -137,22 +133,26 @@ export default function WorkspaceSidebar({
         <div className="mb-2 flex items-center justify-between">
           <span className="text-xs font-medium text-gray-600 dark:text-gray-400">Team progress</span>
           <span className="text-xs font-semibold text-gray-900 dark:text-white">
-            {pct === null ? "—" : `${pct}%`}
+            {pct === null ? "No tasks yet" : `${pct}%`}
           </span>
         </div>
-        <div
-          role="progressbar"
-          aria-valuenow={pct ?? undefined}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label="Team progress"
-          className="h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800"
-        >
+        {/* The bar is hidden with no tasks rather than shown empty: a 0%-looking
+            bar reads as "nothing done" when the truth is "nothing to do". */}
+        {pct !== null && (
           <div
-            className="h-full rounded-full bg-gradient-to-r from-blue-500 to-purple-600 transition-[width] duration-500"
-            style={{ width: `${pct ?? 0}%` }}
-          />
-        </div>
+            role="progressbar"
+            aria-valuenow={pct}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label="Team progress"
+            className="h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-800"
+          >
+            <div
+              className="h-full rounded-full bg-gradient-to-r from-blue-500 to-purple-600 transition-[width] duration-500"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+        )}
 
         {members.length > 0 && (
           <div className="mt-3">

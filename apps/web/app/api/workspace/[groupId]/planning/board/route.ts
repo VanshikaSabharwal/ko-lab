@@ -18,7 +18,7 @@ export async function GET(_req: Request, { params }: { params: { groupId: string
   const access = await requireGroupAccess(groupId);
   if (access.error) return access.error;
 
-  const [columns, milestones] = await Promise.all([
+  const [columns, milestones, dependencies] = await Promise.all([
     prisma.planningColumn.findMany({
       where: { groupId },
       orderBy: { position: "asc" },
@@ -35,6 +35,12 @@ export async function GET(_req: Request, { params }: { params: { groupId: string
       orderBy: { dueDate: "asc" },
       select: { id: true, title: true, startDate: true, dueDate: true, done: true },
     }),
+    // The Workflow view's arrows. Scoped by the denormalized groupId, so this
+    // needs no join through either task.
+    prisma.planningTaskDependency.findMany({
+      where: { groupId },
+      select: { id: true, blockerId: true, dependentId: true },
+    }),
   ]);
 
   return NextResponse.json({
@@ -47,5 +53,6 @@ export async function GET(_req: Request, { params }: { params: { groupId: string
     })),
     tasks: columns.flatMap((c) => c.tasks.map(serializeTask)),
     milestones: milestones.map(serializeMilestone),
+    dependencies,
   });
 }

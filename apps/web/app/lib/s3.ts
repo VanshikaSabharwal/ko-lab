@@ -3,9 +3,15 @@ import { randomUUID } from "crypto";
 
 const S3_ENDPOINT = process.env.S3_ENDPOINT;
 const AVATAR_BUCKET = process.env.S3_BUCKET || "avatars";
+// Public base URL for avatar objects, when the bucket is served through a
+// public domain (e.g. an R2 custom domain). Falls back to the S3 endpoint
+// itself for LocalStack, which serves buckets directly.
+const S3_PUBLIC_BASE_URL = process.env.S3_PUBLIC_BASE_URL;
 
-const s3Client = new S3Client({
-  region: process.env.AWS_REGION || "us-east-1",
+export const s3Client = new S3Client({
+  // R2 is not a regional service and requires region "auto"; LocalStack sets
+  // AWS_REGION explicitly (e.g. us-east-1).
+  region: process.env.AWS_REGION || "auto",
   endpoint: S3_ENDPOINT,
   forcePathStyle: process.env.S3_FORCE_PATH_STYLE === "true",
   credentials: {
@@ -37,5 +43,9 @@ export async function uploadAvatar(
     }),
   );
 
-  return `${S3_ENDPOINT}/${AVATAR_BUCKET}/${key}`;
+  const url = S3_PUBLIC_BASE_URL
+    ? `${S3_PUBLIC_BASE_URL}/${key}`
+    : `${S3_ENDPOINT}/${AVATAR_BUCKET}/${key}`;
+
+  return url;
 }

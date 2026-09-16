@@ -3,6 +3,7 @@ import prisma from "../../../lib/prisma";
 import { getSessionUser, unauthorized, forbidden, requireCodeAccess } from "../../../lib/apiAuth";
 import { getRepoContext, openChangeRequestBranch, resolveAuthor } from "../../../lib/vcs";
 import { checkChangeRequestLimit } from "../../../lib/vcsLimits";
+import { draftContentFor, clearDrafts, contentToPlain } from "../../../lib/draftStore";
 
 // POST — a member submits their drafts as a change request:
 // branch from baseSha → commit → merge default in → open PR.
@@ -29,7 +30,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: limit.reason, code: "LIMIT" }, { status: 429 });
   }
 
-  // Gather this member's drafts
+  // Gather this member's drafts (metadata only — content lives in the clone)
   const drafts = await prisma.modifiedFiles.findMany({
     where: { groupId, userId: me.id },
     select: { path: true, content: true, baseSha: true, deleted: true },
@@ -62,11 +63,24 @@ export async function POST(req: Request) {
   const branchName = `cr/${author.username}/${priorCount + 1}`;
 
   try {
+    // Pull the drafted text from the user's draft objects (legacy rows fall
+    // back to stored content). Deleted drafts commit as a tree deletion.
+    const files = await Promise.all(
+      drafts.map(async (d): Promise<{ path: string; content: string; deleted?: boolean }> => {
+        if (d.deleted) return { path: d.path, content: "", deleted: true };
+        const content = await draftContentFor(groupId, me.id, d.path, d.content);
+        if (content === null) {
+          throw new Error(`Draft content is missing for ${d.path}`);
+        }
+        return { path: d.path, content };
+      }),
+    );
+
     const result = await openChangeRequestBranch({
       ctx,
       branchName,
       baseSha,
-      files: drafts.map((d) => ({ path: d.path, content: d.content, deleted: d.deleted })),
+      files,
       commitMessage: title.trim(),
       author: { name: author.name, email: author.email },
       authorToken: author.token,
@@ -82,7 +96,7 @@ export async function POST(req: Request) {
         prUrl: result.prUrl || null,
         status: result.status,
         baseSha,
-        files: drafts.map((d) => ({ path: d.path, content: d.content, deleted: d.deleted })),
+        files,
       },
     });
 
@@ -114,6 +128,7 @@ export async function POST(req: Request) {
 
     // Clean the member's drafts now they live on the branch
     await prisma.modifiedFiles.deleteMany({ where: { groupId, userId: me.id } });
+    await clearDrafts(groupId, me.id);
 
     return NextResponse.json({
       changeRequestId: cr.id,
@@ -146,7 +161,7 @@ export async function GET(req: Request) {
   if (!group) return NextResponse.json({ error: "Group not found" }, { status: 404 });
 
   const isOwner = group.ownerId === me.id;
-  const changeRequests = await prisma.changeRequest.findMany({
+  const changeRequests = (await prisma.changeRequest.findMany({
     where: { groupId, ...(isOwner ? {} : { authorId: me.id }) },
     orderBy: { createdAt: "desc" },
     select: {
@@ -160,7 +175,14 @@ export async function GET(req: Request) {
       createdAt: true,
       author: { select: { name: true, image: true } },
     },
-  });
+  })).map((cr) => ({
+    ...cr,
+    // Legacy rows stored base64 file text; new ones store plain UTF-8. Decode
+    // the legacy form so the review diff renders the same either way.
+    files: (cr.files as { path: string; content?: string | null; deleted?: boolean }[] | null)?.map(
+      (f) => ({ ...f, content: contentToPlain(f.content ?? null) }),
+    ) ?? null,
+  }));
 
   return NextResponse.json({ isOwner, changeRequests });
 }

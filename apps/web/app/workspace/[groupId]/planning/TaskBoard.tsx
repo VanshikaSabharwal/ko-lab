@@ -20,6 +20,8 @@ interface TaskBoardProps {
   columns: PlanningColumn[];
   tasksByColumn: Map<string, PlanningTask[]>;
   members: Map<string, AvatarUser>;
+  /** Task id → milestone name, for the status pill. */
+  milestoneNames: Map<string, string>;
   searching: boolean;
   onAddColumn: () => void;
   onRenameColumn: (id: string, title: string) => void;
@@ -34,6 +36,7 @@ export default function TaskBoard({
   columns,
   tasksByColumn,
   members,
+  milestoneNames,
   searching,
   onAddColumn,
   onRenameColumn,
@@ -91,6 +94,7 @@ export default function TaskBoard({
             column={column}
             tasks={tasksByColumn.get(column.id) ?? []}
             members={members}
+            milestoneNames={milestoneNames}
             filtered={searching}
             onRename={(title) => onRenameColumn(column.id, title)}
             onDelete={() => onDeleteColumn(column.id)}

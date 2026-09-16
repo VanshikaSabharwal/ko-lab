@@ -3,6 +3,7 @@ import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import Express from "express";
 import { verifyWsToken } from "./wsToken";
+import { git } from "./gitRouter";
 
 const app = Express();
 const port = 8080;
@@ -538,6 +539,9 @@ wss.on("connection", (ws, req) => {
     console.error(`WebSocket error for ${userId}:`, error.message);
   });
 });
+
+// ── Git workspace service (service-to-service auth via bearer token) ──────────
+app.use("/git", git);
 
 // ── Health check (internal use only — protect this in production) ──────────
 app.get("/health", (_req, res) => {

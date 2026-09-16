@@ -34,7 +34,7 @@ export default function PropertiesPanel({
 }: PropertiesPanelProps) {
   if (!node) {
     return (
-      <div className="w-52 shrink-0 border-l border-gray-200 bg-gray-50 p-3 dark:border-gray-700/50 dark:bg-gray-800/80">
+      <div className="w-52 shrink-0 border-l border-gray-200 bg-gray-50 p-3 pt-12 dark:border-gray-700/50 dark:bg-gray-800/80 md:pt-3">
         <p className="text-xs text-gray-500">
           Select an element to edit its properties.
         </p>
@@ -47,7 +47,7 @@ export default function PropertiesPanel({
   const height = Math.round((node.style?.height as number) ?? node.measured?.height ?? 0);
 
   return (
-    <div className="flex w-52 shrink-0 flex-col gap-3 overflow-y-auto border-l border-gray-200 bg-gray-50 p-3 dark:border-gray-700/50 dark:bg-gray-800/80">
+    <div className="flex w-52 shrink-0 flex-col gap-3 overflow-y-auto border-l border-gray-200 bg-gray-50 p-3 pt-12 dark:border-gray-700/50 dark:bg-gray-800/80 md:pt-3">
       <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">
         {d.kind}
       </p>

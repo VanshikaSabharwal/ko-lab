@@ -65,22 +65,9 @@ export async function getDefaultHeadSha(groupId: string): Promise<{ defaultBranc
 
 interface DraftFile {
   path: string;
-  content: string; // base64 (as stored in ModifiedFiles) or plain — see decodeContent
+  content: string; // plain UTF-8 (hydrated from the user's draft clone)
   /** Staged deletion — committed as a tree entry with a null sha. */
   deleted?: boolean;
-}
-
-// ModifiedFiles stores content base64-encoded; commit needs plain UTF-8.
-function decodeContent(content: string): string {
-  try {
-    // Heuristic: our editor base64-encodes on save; decode if it round-trips
-    const decoded = Buffer.from(content, "base64").toString("utf-8");
-    const reencoded = Buffer.from(decoded, "utf-8").toString("base64");
-    if (reencoded.replace(/=+$/, "") === content.replace(/=+$/, "")) return decoded;
-  } catch {
-    /* fall through */
-  }
-  return content;
 }
 
 export interface OpenCrResult {
@@ -138,7 +125,7 @@ export async function openChangeRequestBranch(params: {
             path: f.path,
             mode: "100644" as const,
             type: "blob" as const,
-            content: decodeContent(f.content),
+            content: f.content,
           },
     ),
   });

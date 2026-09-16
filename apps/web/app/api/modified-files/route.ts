@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "../../lib/prisma";
 import { getSessionUser, unauthorized, requireCodeAccess } from "../../lib/apiAuth";
+import { writeDraft, draftContentFor } from "../../lib/draftStore";
 
 export async function POST(req: Request) {
   const me = await getSessionUser();
@@ -8,7 +9,9 @@ export async function POST(req: Request) {
 
   const { name, path, content, group, baseSha } = await req.json();
 
-  if (!name || !path || !content || !group) {
+  // `content` must be a string but may be empty (a file can legitimately be
+  // cleared). Only the draft metadata is stored here.
+  if (!name || !path || typeof content !== "string" || !group) {
     return NextResponse.json(
       { Error: "Missing required fields" },
       { status: 400 },
@@ -22,6 +25,12 @@ export async function POST(req: Request) {
   if (!gate.ok) return gate.res;
 
   try {
+    // Content is written straight to the user's draft objects in S3/R2. The DB
+    // row is metadata only, so write the store first: readers source text from
+    // it, and a DB hiccup after a successful write still leaves the newest text
+    // in place.
+    await writeDraft(group, me.id, path, content);
+
     const modifiedFile = await prisma.modifiedFiles.upsert({
       where: {
         userId_groupId_path: {
@@ -32,7 +41,9 @@ export async function POST(req: Request) {
       },
       update: {
         name,
-        content,
+        // Saving after a staged deletion cancels the deletion — the file is
+        // back in the workspace with new content.
+        deleted: false,
         updatedAt: new Date(),
         modifiedById: me.id,
         // baseSha intentionally omitted — keep the sha from the first save so
@@ -41,7 +52,7 @@ export async function POST(req: Request) {
       create: {
         name,
         path,
-        content,
+        content: null,
         userId: me.id,
         modifiedById: me.id,
         groupId: group,
@@ -76,7 +87,18 @@ export async function GET(req: Request) {
       orderBy: { createdAt: "asc" },
     });
 
-    return NextResponse.json(modifiedFiles, { status: 200 });
+    // Hydrate the visible text from each author's draft clone (legacy DB rows
+    // fall back to stored content). Deleted drafts have no content to show.
+    const hydrated = await Promise.all(
+      modifiedFiles.map(async (f) => ({
+        ...f,
+        content: f.deleted
+          ? null
+          : await draftContentFor(group, f.userId, f.path, f.content),
+      })),
+    );
+
+    return NextResponse.json(hydrated, { status: 200 });
   } catch (error) {
     console.error("Error fetching files: ", error);
     return NextResponse.json(

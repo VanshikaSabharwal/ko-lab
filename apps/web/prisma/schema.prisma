@@ -147,6 +147,11 @@ model Group {
   defaultBranch String?
   headSha       String?
 
+  // Shown in the workspace details panel. Both optional — a group created
+  // before this existed simply renders without them.
+  description String?
+  coverImage  String?
+
   owner           User?            @relation("OwnerGroups", fields: [ownerId], references: [id])
   members         GroupMember[]    @relation("GroupToMembers")
   groupMessage    GroupMessage[]   @relation("GroupMessage")
@@ -298,17 +303,46 @@ model PlanningTask {
   dueDate     DateTime?
   color       String?
   milestoneId String?
+  // Workflow canvas coordinates. Distinct from `position`, which is the sort
+  // key within a column. Null until the task is first dragged on the canvas.
+  flowX       Float?
+  flowY       Float?
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
-  group     Group              @relation("GroupPlanningTasks", fields: [groupId], references: [id])
-  column    PlanningColumn     @relation(fields: [columnId], references: [id], onDelete: Cascade)
-  milestone PlanningMilestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+  group     Group                    @relation("GroupPlanningTasks", fields: [groupId], references: [id])
+  column    PlanningColumn           @relation(fields: [columnId], references: [id], onDelete: Cascade)
+  milestone PlanningMilestone?       @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
   assignees PlanningAssignee[]
+  /// Edges where this task is the blocker (it points at others).
+  blocks    PlanningTaskDependency[] @relation("TaskBlocks")
+  /// Edges where this task is waiting on others.
+  blockedBy PlanningTaskDependency[] @relation("TaskBlockedBy")
 
   @@index([groupId])
   @@index([columnId, position])
   @@index([milestoneId])
+}
+
+/// "blocker must finish before dependent starts" — the arrows in the workflow
+/// view. A join table rather than a column because a task can have several
+/// blockers and block several others.
+model PlanningTaskDependency {
+  id          String   @id @default(cuid())
+  groupId     String
+  /// The task that must finish first.
+  blockerId   String
+  /// The task waiting on it.
+  dependentId String
+  createdAt   DateTime @default(now())
+
+  blocker   PlanningTask @relation("TaskBlocks", fields: [blockerId], references: [id], onDelete: Cascade)
+  dependent PlanningTask @relation("TaskBlockedBy", fields: [dependentId], references: [id], onDelete: Cascade)
+
+  // One edge per pair, in one direction.
+  @@unique([blockerId, dependentId])
+  @@index([groupId])
+  @@index([dependentId])
 }
 
 model PlanningAssignee {
@@ -427,7 +461,10 @@ model ModifiedFiles {
   id           Int     @id @default(autoincrement())
   name         String
   path         String
-  content      String  @db.Text
+  // Draft content lives in the user's private draft clone on the git service
+  // (per-group, per-user), not here. This column is kept nullable only as a
+  // legacy fallback for rows saved before Phase 2; new saves write null.
+  content      String? @db.Text
   userId       String
   groupId      String
   modifiedById String?

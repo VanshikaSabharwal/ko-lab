@@ -53,6 +53,7 @@ A real-time collaborative code editor with group workspaces, GitHub integration,
 | Styling | Tailwind CSS 3 |
 | Editor | CodeMirror 6 via `@uiw/react-codemirror` |
 | GitHub API | Octokit REST |
+| File storage | S3 (`@aws-sdk/client-s3`) — LocalStack in development |
 | Animations | Framer Motion |
 | Onboarding | Shepherd.js |
 | Notifications | React Hot Toast + Web Notifications API |
@@ -93,6 +94,7 @@ co-lab/
 - PostgreSQL database
 - GitHub OAuth app ([create one](https://github.com/settings/developers))
 - Google OAuth credentials ([create one](https://console.cloud.google.com/))
+- Docker — only for [LocalStack](#localstack-local-s3), which backs image uploads in development
 
 ### Environment Variables
 
@@ -112,6 +114,15 @@ GOOGLE_CLIENT_SECRET=your-google-client-secret
 
 NEXT_PUBLIC_WEB_SOCKET_URL=ws://localhost:8080
 ALLOWED_ORIGINS=http://localhost:3000
+
+# S3 (LocalStack in development — see below).
+# The credentials are placeholders: LocalStack accepts any value.
+S3_ENDPOINT=http://localhost:4566
+S3_BUCKET=avatars
+S3_FORCE_PATH_STYLE=true
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
 ```
 
 ### Install & Run
@@ -128,6 +139,29 @@ npm run dev
 ```
 
 The web app runs on `http://localhost:3000` and the WebSocket server on `ws://localhost:8080`.
+
+### LocalStack (local S3)
+
+Image uploads — currently profile avatars — go to S3 via `apps/web/app/lib/s3.ts`. In development
+that S3 is [LocalStack](https://localstack.cloud/) running in Docker, so no AWS account or real
+credentials are needed. Point `S3_ENDPOINT` at a real bucket in production and the same code path
+is used unchanged.
+
+```bash
+cd apps/web
+
+npm run localstack:up     # start LocalStack (creates the avatars bucket)
+npm run localstack:logs   # follow its logs
+npm run localstack:down   # stop it
+```
+
+Notes:
+
+- Runs on port `4566` and only enables the `s3` service.
+- The bucket named by `S3_BUCKET` is created automatically on startup.
+- Uploads persist between restarts, in a Docker volume rather than the repo.
+- `next.config.mjs` allows `localhost:4566` as an image host and in the CSP, but only when
+  `NODE_ENV !== "production"` — so the dev-only endpoint is never trusted in a deployed build.
 
 ### Build for Production
 

@@ -38,6 +38,16 @@ export interface PlanningTask {
   priority: PlanningPriority | null;
   milestoneId: string | null;
   assigneeIds: string[];
+  /** Workflow canvas position; null until the task is first dragged there. */
+  flowX: number | null;
+  flowY: number | null;
+}
+
+/** "blocker must finish before dependent starts" — a Workflow arrow. */
+export interface PlanningDependency {
+  id: string;
+  blockerId: string;
+  dependentId: string;
 }
 
 export interface PlanningMilestone {
@@ -59,6 +69,7 @@ interface BoardState {
   columns: PlanningColumn[];
   tasks: PlanningTask[];
   milestones: PlanningMilestone[];
+  dependencies: PlanningDependency[];
 }
 
 type PlanningOp =
@@ -67,9 +78,11 @@ type PlanningOp =
   | { action: "task_upsert"; task: PlanningTask }
   | { action: "task_delete"; id: string }
   | { action: "milestone_upsert"; milestone: PlanningMilestone }
-  | { action: "milestone_delete"; id: string };
+  | { action: "milestone_delete"; id: string }
+  | { action: "dependency_add"; dependency: PlanningDependency }
+  | { action: "dependency_delete"; blockerId: string; dependentId: string };
 
-const EMPTY: BoardState = { columns: [], tasks: [], milestones: [] };
+const EMPTY: BoardState = { columns: [], tasks: [], milestones: [], dependencies: [] };
 
 function upsertById<T extends { id: string }>(list: T[], item: T): T[] {
   const i = list.findIndex((x) => x.id === item.id);
@@ -98,17 +111,33 @@ export function usePlanningData({ groupId, userId }: { groupId: string; userId?:
       switch (op.action) {
         case "column_upsert":
           return { ...prev, columns: upsertById(prev.columns, op.column).sort(byPosition) };
-        case "column_delete":
+        case "column_delete": {
+          // Tasks cascade server-side; mirror that locally — and with them the
+          // dependency edges of every task that went away.
+          const goneIds = new Set(
+            prev.tasks.filter((t) => t.columnId === op.id).map((t) => t.id),
+          );
           return {
             ...prev,
             columns: prev.columns.filter((c) => c.id !== op.id),
-            // Tasks cascade server-side; mirror that locally.
             tasks: prev.tasks.filter((t) => t.columnId !== op.id),
+            dependencies: prev.dependencies.filter(
+              (d) => !goneIds.has(d.blockerId) && !goneIds.has(d.dependentId),
+            ),
           };
+        }
         case "task_upsert":
           return { ...prev, tasks: upsertById(prev.tasks, op.task).sort(byPosition) };
         case "task_delete":
-          return { ...prev, tasks: prev.tasks.filter((t) => t.id !== op.id) };
+          return {
+            ...prev,
+            tasks: prev.tasks.filter((t) => t.id !== op.id),
+            // The server cascades the task's dependency rows; mirror that here
+            // or the Workflow view keeps edges pointing at a node that's gone.
+            dependencies: prev.dependencies.filter(
+              (d) => d.blockerId !== op.id && d.dependentId !== op.id,
+            ),
+          };
         case "milestone_upsert":
           return { ...prev, milestones: upsertById(prev.milestones, op.milestone) };
         case "milestone_delete":
@@ -117,6 +146,31 @@ export function usePlanningData({ groupId, userId }: { groupId: string; userId?:
             milestones: prev.milestones.filter((m) => m.id !== op.id),
             // Server uses SetNull, so tasks survive with the link cleared.
             tasks: prev.tasks.map((t) => (t.milestoneId === op.id ? { ...t, milestoneId: null } : t)),
+          };
+        case "dependency_add":
+          // Keyed on the pair, not the id: an optimistic edge and the server's
+          // confirmation of it are the same arrow with different ids.
+          return prev.dependencies.some(
+            (d) =>
+              d.blockerId === op.dependency.blockerId &&
+              d.dependentId === op.dependency.dependentId,
+          )
+            ? {
+                ...prev,
+                dependencies: prev.dependencies.map((d) =>
+                  d.blockerId === op.dependency.blockerId &&
+                  d.dependentId === op.dependency.dependentId
+                    ? op.dependency
+                    : d,
+                ),
+              }
+            : { ...prev, dependencies: [...prev.dependencies, op.dependency] };
+        case "dependency_delete":
+          return {
+            ...prev,
+            dependencies: prev.dependencies.filter(
+              (d) => !(d.blockerId === op.blockerId && d.dependentId === op.dependentId),
+            ),
           };
         default:
           return prev;
@@ -140,6 +194,7 @@ export function usePlanningData({ groupId, userId }: { groupId: string; userId?:
       columns: (data.columns ?? []).sort(byPosition),
       tasks: (data.tasks ?? []).sort(byPosition),
       milestones: data.milestones ?? [],
+      dependencies: data.dependencies ?? [],
     });
     setLoaded(true);
   }, [groupId]);
@@ -158,6 +213,7 @@ export function usePlanningData({ groupId, userId }: { groupId: string; userId?:
             columns: (board.columns ?? []).sort(byPosition),
             tasks: (board.tasks ?? []).sort(byPosition),
             milestones: board.milestones ?? [],
+            dependencies: board.dependencies ?? [],
           });
         }
         if (memberData) {
@@ -338,6 +394,54 @@ export function usePlanningData({ groupId, userId }: { groupId: string; userId?:
     [groupId, mutate],
   );
 
+  // ── Dependencies (Workflow arrows) ────────────────────────────────────
+  const addDependency = useCallback(
+    (blockerId: string, dependentId: string) =>
+      mutate<PlanningDependency>(
+        // Optimistic edge with a placeholder id; the server's row replaces it,
+        // matched on the pair rather than the id.
+        {
+          action: "dependency_add",
+          dependency: { id: `pending:${blockerId}:${dependentId}`, blockerId, dependentId },
+        },
+        () =>
+          fetch(
+            `/api/workspace/${groupId}/planning/dependencies`,
+            json({ blockerId, dependentId }),
+          ),
+        (dependency) => ({ action: "dependency_add", dependency }),
+        "Couldn't link those tasks",
+      ),
+    [groupId, mutate],
+  );
+
+  const removeDependency = useCallback(
+    (blockerId: string, dependentId: string) =>
+      mutate<{ blockerId: string; dependentId: string }>(
+        { action: "dependency_delete", blockerId, dependentId },
+        () =>
+          fetch(
+            `/api/workspace/${groupId}/planning/dependencies?blockerId=${encodeURIComponent(
+              blockerId,
+            )}&dependentId=${encodeURIComponent(dependentId)}`,
+            { method: "DELETE" },
+          ),
+        () => ({ action: "dependency_delete", blockerId, dependentId }),
+        "Couldn't remove that link",
+      ),
+    [groupId, mutate],
+  );
+
+  /**
+   * Workflow canvas position. Separate from `updateTask` only for intent — it
+   * goes through the same PATCH, but callers shouldn't have to know that moving
+   * a node on the canvas is a task patch.
+   */
+  const moveTaskOnCanvas = useCallback(
+    (id: string, flowX: number, flowY: number) => updateTask(id, { flowX, flowY }),
+    [updateTask],
+  );
+
   // Tasks grouped by column, in position order — what the board renders from.
   const tasksByColumn = useMemo(() => {
     const map = new Map<string, PlanningTask[]>();
@@ -359,6 +463,7 @@ export function usePlanningData({ groupId, userId }: { groupId: string; userId?:
     columns: state.columns,
     tasks: state.tasks,
     milestones: state.milestones,
+    dependencies: state.dependencies,
     tasksByColumn,
     members,
     membersById,
@@ -379,5 +484,8 @@ export function usePlanningData({ groupId, userId }: { groupId: string; userId?:
     addMilestone,
     updateMilestone,
     deleteMilestone,
+    addDependency,
+    removeDependency,
+    moveTaskOnCanvas,
   };
 }

@@ -4,6 +4,23 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",")
   : ["http://localhost:3000"];
 
+// Production avatar host from R2 (S3_PUBLIC_BASE_URL). Added to next/image
+// remotePatterns so avatars served from a bucket custom domain are optimised.
+const s3PublicBase = process.env.S3_PUBLIC_BASE_URL;
+const s3ImagePatterns = [];
+if (s3PublicBase) {
+  try {
+    const { protocol, hostname, port } = new URL(s3PublicBase);
+    s3ImagePatterns.push({
+      protocol: protocol.replace(":", ""),
+      hostname,
+      ...(port ? { port } : {}),
+    });
+  } catch {
+    // malformed URL — ignore; avatars still render via a plain <img> fallback
+  }
+}
+
 const securityHeaders = [
   // Prevent browsers from MIME-sniffing the content-type
   { key: "X-Content-Type-Options", value: "nosniff" },
@@ -20,10 +37,12 @@ const securityHeaders = [
   // Control how much referrer info is sent
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
 
-  // Allow camera/mic for calls
+  // Camera/mic are granted per-route below, not here — see callHeaders. A
+  // blanket camera=(self) made Android show a vague "wants to access other
+  // apps and services" prompt on pages that never place a call.
   {
     key: "Permissions-Policy",
-    value: "camera=(self), microphone=(self), geolocation=(), interest-cohort=()",
+    value: "camera=(), microphone=(), geolocation=(), interest-cohort=()",
   },
 
   // Legacy XSS filter (still useful for older browsers)
@@ -55,6 +74,18 @@ const securityHeaders = [
   },
 ];
 
+// Routes where a call can start or ring: the chat list, a 1-1 chat, and a group
+// chat. CallProvider is mounted app-wide, but only these surfaces can initiate
+// or receive, so only they need camera/mic.
+const CALL_ROUTES = ["/chat-room", "/chat/:path*", "/group/:path*"];
+
+const callHeaders = [
+  {
+    key: "Permissions-Policy",
+    value: "camera=(self), microphone=(self), geolocation=(), interest-cohort=()",
+  },
+];
+
 const nextConfig = {
   headers: async () => [
     {
@@ -62,6 +93,9 @@ const nextConfig = {
       source: "/(.*)",
       headers: securityHeaders,
     },
+    // Re-grant camera/mic only on call-capable routes. Listed after the
+    // catch-all so these values override the deny above.
+    ...CALL_ROUTES.map((source) => ({ source, headers: callHeaders })),
     {
       // CORS for your API routes — only allow your own origin
       source: "/api/(.*)",
@@ -91,6 +125,7 @@ const nextConfig = {
 
   images: {
     remotePatterns: [
+      ...s3ImagePatterns,
       { protocol: "https", hostname: "avatars.githubusercontent.com" },
       { protocol: "https", hostname: "lh3.googleusercontent.com" },
       // LocalStack S3 endpoint, used for locally-uploaded profile avatars in dev.

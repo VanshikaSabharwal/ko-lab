@@ -15,6 +15,8 @@ interface TaskColumnProps {
   column: PlanningColumn;
   tasks: PlanningTask[];
   members: Map<string, AvatarUser>;
+  /** Task id → milestone name, for the status pill. */
+  milestoneNames: Map<string, string>;
   onRename: (title: string) => void;
   onDelete: () => void;
   onAddTask: () => void;
@@ -28,6 +30,7 @@ export default function TaskColumn({
   column,
   tasks,
   members,
+  milestoneNames,
   onRename,
   onDelete,
   onAddTask,
@@ -102,6 +105,7 @@ export default function TaskColumn({
               key={task.id}
               task={task}
               members={members}
+              milestoneName={milestoneNames.get(task.id) ?? null}
               onOpen={() => onOpenTask(task)}
               onDelete={() => onDeleteTask(task.id)}
             />

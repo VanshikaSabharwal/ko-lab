@@ -40,7 +40,7 @@ interface UiPaletteProps {
 
 export default function UiPalette({ onPick }: UiPaletteProps) {
   return (
-    <div className="w-44 shrink-0 overflow-y-auto border-r border-gray-200 bg-gray-50 p-3 dark:border-gray-700/50 dark:bg-gray-800/80">
+    <div className="w-44 shrink-0 overflow-y-auto border-r border-gray-200 bg-gray-50 p-3 pt-12 dark:border-gray-700/50 dark:bg-gray-800/80 md:pt-3">
       {CATEGORIES.map((category) => (
         <div key={category} className="mb-4">
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-gray-500">
