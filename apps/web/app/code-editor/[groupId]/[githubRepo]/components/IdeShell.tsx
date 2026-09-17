@@ -4,7 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { signOut } from "next-auth/react";
 import {
-  Folder, Users, Settings, Menu, Search, Bell, LogOut, Plus, X, Sparkles, Trash2,
+  Folder, Users, Settings, Menu, Search, LogOut, Plus, X, Sparkles, Trash2,
 } from "lucide-react";
 import { cn } from "../../../../lib/utils";
 
@@ -51,12 +51,6 @@ export default function IdeShell({
           <Menu size={18} />
         </button>
 
-        <Link href="/" className="shrink-0 text-lg font-bold tracking-tight">
-          <span className="bg-gradient-to-r from-blue-500 to-purple-600 bg-clip-text text-transparent">
-            Ko-lab
-          </span>
-        </Link>
-
         <nav className="hidden items-center gap-1 md:flex">
           {NAV.map(({ key, label }) => (
             <button
@@ -86,15 +80,6 @@ export default function IdeShell({
           />
         </div>
 
-        <button aria-label="Notifications" className="ml-auto shrink-0 rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 sm:ml-0">
-          <Bell size={16} />
-        </button>
-        <button
-          onClick={() => signOut()}
-          className="hidden shrink-0 rounded-lg px-2.5 py-1.5 text-sm text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800 sm:block"
-        >
-          Sign out
-        </button>
       </header>
 
       <div className="relative flex min-h-0 flex-1">

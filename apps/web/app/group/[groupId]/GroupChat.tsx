@@ -8,19 +8,22 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { LayoutGrid, Video, Phone } from "lucide-react";
 import { useCall } from "../../components/call/CallProvider";
+import { useTheme } from "next-themes";
 import { fetchWsToken } from "../../lib/wsAuth";
 import { isSystemMessage, systemMessageText } from "../../lib/systemMessages";
+import ChatBackgroundPicker from "../../components/ChatBackgroundPicker";
+import {
+  BG_GROUPS,
+  DEFAULT_BG,
+  bgLabel,
+  bgStyles,
+  findBgOption,
+} from "../../lib/chatBackgrounds";
 
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
 
-const BG_OPTIONS = [
-  { label: "Default", value: "bg-gray-50 dark:bg-gray-950" },
-  { label: "Midnight", value: "bg-gray-900 dark:bg-gray-900" },
-  { label: "Sky", value: "bg-sky-50 dark:bg-sky-950" },
-  { label: "Sage", value: "bg-emerald-50 dark:bg-emerald-950" },
-  { label: "Rose", value: "bg-rose-50 dark:bg-rose-950" },
-  { label: "Sand", value: "bg-amber-50 dark:bg-amber-950" },
-];
+/** The handful shown inline in the menu; the rest live behind "More colors". */
+const QUICK_BG_OPTIONS = BG_GROUPS[0]!.options;
 
 interface GroupChatProps {
   group: string;
@@ -87,9 +90,14 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
   // Background
   const [chatBg, setChatBg] = useState(() =>
     typeof window !== "undefined"
-      ? (localStorage.getItem(`groupChatBg_${group}`) || BG_OPTIONS[0]!.value)
-      : BG_OPTIONS[0]!.value
+      ? (localStorage.getItem(`groupChatBg_${group}`) || DEFAULT_BG)
+      : DEFAULT_BG
   );
+  const [bgPickerOpen, setBgPickerOpen] = useState(false);
+  const { resolvedTheme } = useTheme();
+  const isDarkTheme = resolvedTheme === "dark";
+  const bgOption = findBgOption(chatBg);
+  const chatBgStyles = bgStyles(bgOption, isDarkTheme);
 
   // WS reconnect
   const reconnectAttempts = useRef(0);
@@ -406,8 +414,14 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
 
   const handleChangeBg = (value: string) => {
     setChatBg(value);
-    localStorage.setItem(`groupChatBg_${group}`, value);
+    try {
+      localStorage.setItem(`groupChatBg_${group}`, value);
+    } catch {
+      // Private browsing can refuse writes; the choice still applies for the
+      // session, it just won't be remembered.
+    }
     setMenuOpen(false);
+    setBgPickerOpen(false);
   };
 
   const handleDeleteGroup = async () => {
@@ -453,7 +467,10 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
   }
 
   return (
-    <div className={`relative flex flex-col h-[calc(100vh-56px)] ${chatBg} transition-colors duration-500`}>
+    <div
+      style={chatBgStyles.style}
+      className={`relative flex flex-col h-[calc(100vh-56px)] ${chatBgStyles.className} transition-colors duration-500`}
+    >
       {/* Header */}
       <div className="px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between relative">
         <div className="flex items-center gap-3 min-w-0">
@@ -648,7 +665,7 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
               <div className="border-t border-gray-100 dark:border-gray-800 px-4 py-2">
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Background</p>
                 <div className="grid grid-cols-3 gap-1.5">
-                  {BG_OPTIONS.map((opt) => (
+                  {QUICK_BG_OPTIONS.map((opt) => (
                     <button
                       key={opt.value}
                       onClick={() => handleChangeBg(opt.value)}
@@ -656,11 +673,17 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
                         chatBg === opt.value ? "ring-2 ring-blue-500" : "hover:bg-gray-50 dark:hover:bg-gray-800"
                       }`}
                     >
-                      <div className={`w-8 h-8 rounded-full border border-gray-200 dark:border-gray-700 ${opt.value.split(" ")[0]}`} />
-                      <span className="text-xs text-gray-500 dark:text-gray-400">{opt.label}</span>
+                      <div className={`w-8 h-8 rounded-full border border-gray-200 dark:border-gray-700 ${isDarkTheme ? opt.dark ?? "" : opt.light}`} />
+                      <span className="text-xs text-gray-500 dark:text-gray-400">{bgLabel(opt, isDarkTheme)}</span>
                     </button>
                   ))}
                 </div>
+                <button
+                  onClick={() => { setMenuOpen(false); setBgPickerOpen(true); }}
+                  className="mt-2 w-full rounded-lg border border-gray-200 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                >
+                  More colors…
+                </button>
               </div>
             </div>
           </div>
@@ -852,6 +875,14 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
             </div>
           </div>
         </div>
+      )}
+
+      {bgPickerOpen && (
+        <ChatBackgroundPicker
+          current={chatBg}
+          onSelect={handleChangeBg}
+          onClose={() => setBgPickerOpen(false)}
+        />
       )}
     </div>
   );

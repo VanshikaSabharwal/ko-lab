@@ -9,10 +9,11 @@ export async function POST(req: Request) {
   const me = await getSessionUser();
   if (!me) return unauthorized();
 
-  const { groupId, phoneNumber } = await req.json();
-  if (!phoneNumber) {
+  const { groupId, phoneNumber, email: rawEmail } = await req.json();
+  const email: string | null = rawEmail?.trim().toLowerCase() || null;
+  if (!phoneNumber && !email) {
     return NextResponse.json(
-      { error: "Phone number is required" },
+      { error: "A phone number or email is required" },
       { status: 400 },
     );
   }
@@ -27,18 +28,23 @@ export async function POST(req: Request) {
     // phone in different groups, but querying phone alone meant a number
     // invited once could never be invited anywhere else.
     const existingInvite = await prisma.invite.findFirst({
-      where: { phone: phoneNumber, groupId },
+      where: email ? { email, groupId } : { phone: phoneNumber, groupId },
     });
 
     if (existingInvite) {
       return NextResponse.json(
-        { error: "Invite with this phone number already exists." },
+        {
+          error: email
+            ? "Invite with this email already exists."
+            : "Invite with this phone number already exists.",
+        },
         { status: 400 },
       );
     } else {
       const invite = await prisma.invite.create({
         data: {
-          phone: phoneNumber,
+          phone: email ? null : phoneNumber,
+          email,
           groupId,
           status: "pending",
           createdAt: new Date(),
@@ -60,14 +66,23 @@ export async function POST(req: Request) {
       const invitationLink = `${getRequestBaseUrl(req)}/join/${link.token}`;
       const message = `You have been invited to join our app! Click here to sign up:${invitationLink}`;
       const encodedMessage = encodeURIComponent(message);
-      const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
+      // An email invite has no WhatsApp thread to open, so it gets a mailto:
+      // draft instead; the client falls back to showing the raw link.
+      const whatsappUrl = email
+        ? null
+        : `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
+      const mailtoUrl = email
+        ? `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(
+            "You have been invited to join Ko-lab",
+          )}&body=${encodedMessage}`
+        : null;
 
-      // If that phone already belongs to an account, notify them now. If not,
-      // there is nobody to address yet — the join page raises the notification
-      // once they sign up and redeem the link.
+      // If that phone or email already belongs to an account, notify them now.
+      // If not, there is nobody to address yet — the join page raises the
+      // notification once they sign up and redeem the link.
       const [existingUser, actor] = await Promise.all([
         prisma.user.findUnique({
-          where: { phone: phoneNumber },
+          where: email ? { email } : { phone: phoneNumber },
           select: { id: true, name: true, email: true },
         }),
         prisma.user.findUnique({
@@ -80,10 +95,14 @@ export async function POST(req: Request) {
         actorId: me.id,
         actorName: actor?.name || actor?.email || "Someone",
         inviteeId: existingUser?.id ?? null,
-        inviteeName: existingUser?.name || existingUser?.email || phoneNumber,
+        inviteeName:
+          existingUser?.name || existingUser?.email || email || phoneNumber,
       });
 
-      return NextResponse.json({ success: true, whatsappUrl }, { status: 200 });
+      return NextResponse.json(
+        { success: true, whatsappUrl, mailtoUrl, invitationLink },
+        { status: 200 },
+      );
     }
   } catch (error) {
     console.error("Error sending invite:", error);

@@ -398,13 +398,17 @@ enum CodeAccessStatus {
 }
 
 model Invite {
-  id        String   @id @default(cuid())
-  phone     String
+  id String @id @default(cuid())
+  // Exactly one of phone/email identifies the invitee, depending on which the
+  // inviter typed. Both are optional so either kind of invite can be stored.
+  phone     String?
+  email     String?
   groupId   String
   status    String   @default("pending")
   createdAt DateTime
 
   @@unique([phone, groupId])
+  @@unique([email, groupId])
 }
 
 /// A shareable join key for a group.

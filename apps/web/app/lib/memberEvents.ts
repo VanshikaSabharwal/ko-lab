@@ -90,21 +90,27 @@ export async function recordMemberInvited({
 }
 
 /**
- * Claim any pending phone invites for a user who has just signed up or joined.
+ * Claim any pending invites for a user who has just signed up or joined.
  *
- * A phone invite is created before the invitee has an account, so there is
- * nobody to notify at the time. This links the invite to the now-existing user
- * and produces the notification that was deferred.
+ * An invite is created before the invitee has an account, so there is nobody to
+ * notify at the time. This links the invite to the now-existing user and
+ * produces the notification that was deferred. The invite may have been
+ * addressed to either the phone or the email, so both are matched.
  */
 export async function claimPendingInvites(
   userId: string,
   phone: string | null | undefined,
   groupId: string,
+  email?: string | null,
 ): Promise<void> {
-  if (!phone) return;
+  const identifiers = [
+    ...(phone ? [{ phone }] : []),
+    ...(email ? [{ email: email.trim().toLowerCase() }] : []),
+  ];
+  if (identifiers.length === 0) return;
   try {
     const invite = await prisma.invite.findFirst({
-      where: { phone, groupId, status: "pending" },
+      where: { groupId, status: "pending", OR: identifiers },
       select: { id: true },
     });
     if (!invite) return;

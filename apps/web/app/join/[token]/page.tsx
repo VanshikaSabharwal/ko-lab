@@ -68,9 +68,9 @@ export default async function JoinPage({ params }: { params: { token: string } }
       }),
     ]);
 
-    // The notification deferred at invite time. Someone invited by phone had
-    // no account then, so there was no user to address — this is the first
-    // moment there is one.
+    // The notification deferred at invite time. Someone invited by phone or
+    // email had no account then, so there was no user to address — this is the
+    // first moment there is one.
     const [joiner, creator] = await Promise.all([
       prisma.user.findUnique({
         where: { id: me.id },
@@ -83,7 +83,12 @@ export default async function JoinPage({ params }: { params: { token: string } }
     ]);
     const joinerName = joiner?.name || joiner?.email || "A new member";
 
-    await claimPendingInvites(me.id, joiner?.phone, link.groupId);
+    await claimPendingInvites(
+      me.id,
+      joiner?.phone,
+      link.groupId,
+      joiner?.email,
+    );
     await recordMemberInvited({
       groupId: link.groupId,
       // The person whose link this is, so the chat reads as they invited them.

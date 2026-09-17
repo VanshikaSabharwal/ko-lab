@@ -8,9 +8,22 @@ export async function GET(req: Request) {
 
   const { searchParams } = new URL(req.url);
   const phone = searchParams.get("phone");
+  const email = searchParams.get("email")?.trim().toLowerCase();
 
-  // Basic validation for phone number
-  if (!phone || phone.length < 10) {
+  // A member is looked up by phone or by email, whichever the caller passed.
+  if (!phone && !email) {
+    return NextResponse.json(
+      { exists: false, error: "A phone number or email is required" },
+      { status: 400 },
+    );
+  }
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return NextResponse.json(
+      { exists: false, error: "Invalid email address" },
+      { status: 400 },
+    );
+  }
+  if (!email && (!phone || phone.length < 10)) {
     return NextResponse.json(
       { exists: false, error: "Invalid phone number" },
       { status: 400 },
@@ -19,9 +32,7 @@ export async function GET(req: Request) {
 
   try {
     const user = await prisma.user.findUnique({
-      where: {
-        phone: phone,
-      },
+      where: email ? { email } : { phone: phone! },
     });
 
     if (user) {
@@ -30,7 +41,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ exists: false });
     }
   } catch (err) {
-    console.error("Error while checking user with phone:", phone, err);
+    console.error("Error while checking user:", email || phone, err);
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 },
