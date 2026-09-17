@@ -84,14 +84,14 @@ const NotificationsPage = () => {
   if (loading)
     return (
       <div className="min-h-[calc(100vh-56px)] flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-        <p className="text-sm text-gray-400">Loading notifications...</p>
+        <p className="text-sm text-gray-500 dark:text-gray-400">Loading notifications...</p>
       </div>
     );
 
   if (error)
     return (
       <div className="min-h-[calc(100vh-56px)] flex items-center justify-center bg-gray-50 dark:bg-gray-950">
-        <p className="text-sm text-red-500">{error}</p>
+        <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
       </div>
     );
 
@@ -160,7 +160,7 @@ const NotificationsPage = () => {
                           </div>
                           <div className="min-w-0">
                             <p className="text-sm font-semibold text-gray-900 dark:text-white">{dm.name}</p>
-                            <p className="text-xs text-gray-400 truncate">{dm.lastMessage}</p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{dm.lastMessage}</p>
                           </div>
                         </div>
                         <span className="ml-3 flex-shrink-0 bg-blue-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
@@ -246,7 +246,7 @@ const NotificationsPage = () => {
                         <span className="font-medium">{r.userName}</span> raised a CR in{" "}
                         <span className="font-medium">{r.groupName}</span>
                       </p>
-                      <p className="text-xs text-red-500 mt-1">{r.message}</p>
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">{r.message}</p>
                       <Link
                         href={`/confirm-changes/${r.groupId}`}
                         className="text-xs font-medium text-blue-500 hover:underline mt-2 inline-block"

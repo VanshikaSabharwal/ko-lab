@@ -31,6 +31,17 @@ export async function POST(req: Request) {
       return forbidden("Only the group owner can add other members");
     }
 
+    // The owner is recorded on Group.ownerId, not as a GroupMember row, so the
+    // membership check below cannot see them. Without this an owner could add
+    // themselves and end up both owner and member — duplicated in the roster,
+    // and double-counted anywhere members are listed or rung for a call.
+    if (userId === groupExists.ownerId) {
+      return NextResponse.json(
+        { error: "The group owner is already in this group" },
+        { status: 400 },
+      );
+    }
+
     // Check if the user is already a member of the group
     const existingMember = await prisma.groupMember.findFirst({
       where: {

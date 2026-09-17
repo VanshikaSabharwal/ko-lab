@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useSession } from "next-auth/react";
 import Link from "next/link";
+import toast from "react-hot-toast";
 
 interface AddGroupProps {
   groupId: string;
@@ -30,16 +31,15 @@ const AddGroupMember: React.FC<AddGroupProps> = ({ groupId }) => {
   const { status } = useSession();
   const [backToGroup, setBackToGroup] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
-  // Submitting spans three sequential requests (check-user, get-user-id,
-  // add-group-member), so without this the button sat inert for the whole
-  // round-trip and looked like nothing had happened.
+  // Submitting spans a lookup then an add, so without this the button sat
+  // inert for the whole round-trip and looked like nothing had happened.
   const [submitting, setSubmitting] = useState(false);
   const [sendingInvite, setSendingInvite] = useState(false);
 
   const byEmail = inviteBy === "email";
   /** Whichever identifier the inviter is currently typing. */
   const identifier = byEmail ? email.trim() : phoneNumber.trim();
-  /** The query string both lookup endpoints accept. */
+  /** The query string the lookup endpoint accepts. */
   const lookupQuery = byEmail
     ? `email=${encodeURIComponent(identifier)}`
     : `phone=${encodeURIComponent(identifier)}`;
@@ -55,34 +55,32 @@ const AddGroupMember: React.FC<AddGroupProps> = ({ groupId }) => {
     setInvitationLink(null);
   };
 
-  const getUserId = async (): Promise<string | null> => {
+  /**
+   * One request answering both "does this account exist" and "what is its id".
+   * These were two identical sequential lookups; the second could only return
+   * what the first already had.
+   */
+  const lookupUser = async (): Promise<
+    { exists: true; userId: string } | { exists: false } | null
+  > => {
     try {
-      const res = await fetch(`/api/get-user-id?${lookupQuery}`);
+      const res = await fetch(`/api/lookup-user?${lookupQuery}`);
       const data = await res.json();
 
+      if (data.error) {
+        toast.error(data.error);
+        return null;
+      }
+      setUserExists(data.exists);
       if (data.exists && data.userId) {
         setUserId(data.userId);
-        return data.userId;
-      } else if (data.error) {
-        alert(`Error: ${data.error}`);
-        setBackToGroup(true);
+        return { exists: true, userId: data.userId };
       }
-      return null;
+      return { exists: false };
     } catch (err) {
-      console.error("Error getting user ID:", err);
+      console.error("Error looking up user:", err);
+      toast.error("Couldn't reach the server. Check your connection.");
       return null;
-    }
-  };
-
-  const checkUserExists = async () => {
-    try {
-      const response = await fetch(`/api/check-user?${lookupQuery}`);
-      const data = await response.json();
-      setUserExists(data.exists);
-      return data.exists;
-    } catch (err) {
-      console.error("Error checking user:", err);
-      return false;
     }
   };
 
@@ -105,13 +103,14 @@ const AddGroupMember: React.FC<AddGroupProps> = ({ groupId }) => {
         setWhatsappUrl(data.whatsappUrl ?? null);
         setMailtoUrl(data.mailtoUrl ?? null);
         setInvitationLink(data.invitationLink ?? null);
+        toast.success(`Invite created for ${identifier}`);
       } else {
         console.error("Failed to send invite:", data.error);
-        alert(`Error: ${data.error}`);
+        toast.error(data.error || "Failed to send the invite.");
       }
     } catch (err) {
       console.error("Error sending invite:", err);
-      alert("An error occurred while sending the invite.");
+      toast.error("An error occurred while sending the invite.");
     } finally {
       setSendingInvite(false);
     }
@@ -127,14 +126,15 @@ const AddGroupMember: React.FC<AddGroupProps> = ({ groupId }) => {
       const data = await res.json();
 
       if (data.success) {
-        alert("Member added successfully!");
+        toast.success("Member added successfully!");
         setBackToGroup(true);
       } else if (data.error) {
-        alert(`Error: ${data.error}`);
+        toast.error(data.error);
         setBackToGroup(true);
       }
     } catch (err) {
       console.error("Error adding group member:", err);
+      toast.error("An error occurred while adding the member.");
     }
   };
 
@@ -144,18 +144,12 @@ const AddGroupMember: React.FC<AddGroupProps> = ({ groupId }) => {
 
     setSubmitting(true);
     try {
-      const exists = await checkUserExists();
-      if (exists === true) {
-        const userId = await getUserId();
-        if (userId) {
-          await addGroupMember(userId);
-        } else {
-          alert("Failed to get user ID.");
-        }
-      } else if (exists === false) {
-        await sendInvite();
+      const result = await lookupUser();
+      if (!result) return; // lookupUser has already surfaced the reason
+      if (result.exists) {
+        await addGroupMember(result.userId);
       } else {
-        alert("Failed to check if user exists.");
+        await sendInvite();
       }
     } finally {
       setSubmitting(false);

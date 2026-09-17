@@ -33,15 +33,15 @@ const Notifications = () => {
   };
 
   return (
-    <div className="relative flex items-center space-x-4">
+    <div className="flex items-center space-x-4">
       <Link
         href="/notifications"
-        className="text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 font-semibold text-lg transition-colors duration-200 hover:scale-105"
+        className="relative inline-flex text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 font-semibold text-lg transition-colors duration-200 hover:scale-105"
         onClick={handleViewNotifications} 
       >
         Notifications
         {notificationCount > 0 && (
-          <span className="absolute -top-2 -right-3 bg-red-600 text-white text-sm font-bold px-2 py-1 rounded-full flex items-center justify-center w-6 h-6">
+          <span className="absolute -top-2 -right-4 bg-red-600 text-white text-xs font-bold rounded-full inline-flex items-center justify-center min-w-5 h-5 px-1">
             {notificationCount}
           </span>
         )}
