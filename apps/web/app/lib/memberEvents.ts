@@ -1,5 +1,6 @@
 import prisma from "./prisma";
 import { SYSTEM_MESSAGE_PREFIX } from "./systemMessages";
+import { pushToUsers } from "./pushClient";
 
 /**
  * Notifications and chat system messages for membership changes.
@@ -82,6 +83,18 @@ export async function recordMemberInvited({
     );
 
     await Promise.all(writes);
+
+    // Tell the invitee's open sockets, so the notification lands now rather
+    // than whenever they next open the notifications page.
+    if (inviteeId) {
+      await pushToUsers([inviteeId], {
+        type: "notification",
+        notificationType: "GROUP_INVITE",
+        groupId,
+        groupName: group.groupName,
+        message: `${actorName} added you to ${group.groupName}`,
+      });
+    }
   } catch (error) {
     // Deliberately swallowed: the membership change already happened, and
     // failing the request now would be worse than a missing notification.

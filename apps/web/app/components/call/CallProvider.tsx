@@ -12,6 +12,7 @@ import {
 import { Room, RoomEvent } from "livekit-client";
 import { useSession } from "next-auth/react";
 import toast from "react-hot-toast";
+import { Bell } from "lucide-react";
 import { fetchWsToken } from "../../lib/wsAuth";
 
 type CallType = "AUDIO" | "VIDEO" | "GROUP";
@@ -239,6 +240,19 @@ export function CallProvider({ children }: { children: ReactNode }) {
           break;
         case "call_missed":
           toast.error("Call missed");
+          break;
+        // Not call signalling, but this provider holds the only app-wide
+        // socket, so routing it here means a notification lands on whatever
+        // page the recipient is on rather than only on /notifications.
+        case "notification":
+          if (typeof msg.message === "string") {
+            toast(msg.message, {
+              icon: <Bell className="w-4 h-4 text-blue-500" />,
+            });
+            window.dispatchEvent(
+              new CustomEvent("ko-lab:notification", { detail: msg }),
+            );
+          }
           break;
       }
     }

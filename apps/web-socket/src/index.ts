@@ -2,6 +2,7 @@ import "dotenv/config";
 import WebSocket, { WebSocketServer } from "ws";
 import http from "http";
 import Express from "express";
+import { timingSafeEqual } from "crypto";
 import { verifyWsToken } from "./wsToken";
 import { git } from "./gitRouter";
 
@@ -542,6 +543,39 @@ wss.on("connection", (ws, req) => {
 
 // ── Git workspace service (service-to-service auth via bearer token) ──────────
 app.use("/git", git);
+
+// ── Internal push (service-to-service auth via bearer token) ─────────────────
+// The Next.js app writes a notification row to Postgres, then calls this so the
+// recipient's open socket hears about it immediately. Without it a notification
+// only surfaced when the recipient next loaded the notifications page, which
+// made delivery feel arbitrary rather than merely late.
+//
+// Fire-and-forget by design: the row is already committed, so a delivery
+// failure here must not fail the originating request. A user with no open
+// socket simply picks it up on their next fetch, exactly as before.
+app.post("/internal/push", (req, res) => {
+  const header = req.headers.authorization || "";
+  const given = Buffer.from(header.startsWith("Bearer ") ? header.slice(7) : "");
+  const expected = Buffer.from(process.env.GIT_SERVICE_SECRET || "");
+  if (
+    expected.length === 0 ||
+    given.length !== expected.length ||
+    !timingSafeEqual(new Uint8Array(given), new Uint8Array(expected))
+  ) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
+  const { userIds, payload } = req.body ?? {};
+  if (!Array.isArray(userIds) || userIds.length === 0 || !payload) {
+    return res.status(400).json({ error: "userIds[] and payload required" });
+  }
+
+  let delivered = 0;
+  for (const userId of userIds) {
+    if (typeof userId === "string" && sendToUser(userId, payload)) delivered++;
+  }
+  res.json({ delivered });
+});
 
 // ── Health check (internal use only — protect this in production) ──────────
 app.get("/health", (_req, res) => {

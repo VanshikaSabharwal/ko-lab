@@ -163,6 +163,10 @@ const Confirm = ({ group }: GroupProps) => {
   const [selectedPath, setSelectedPath] = useState("");
   const [panes, setPanes] = useState({ original: "", modified: "" });
   const [activeFiles, setActiveFiles] = useState<DraftFile[]>([]); // drafts or a CR's files
+  // The CR awaiting a rejection reason, plus the reason being typed. Replaces
+  // window.prompt(), which is unstyled and blocked outright by some browsers.
+  const [rejecting, setRejecting] = useState<ChangeRequest | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
 
   const loadCrs = useCallback(async () => {
     const res = await fetch(`/api/vcs/change-request?groupId=${group}`);
@@ -267,8 +271,17 @@ const Confirm = ({ group }: GroupProps) => {
     }
   };
 
-  const rejectCr = async (cr: ChangeRequest) => {
-    const reason = window.prompt("Reason for rejecting (optional):") ?? undefined;
+  /** Open the reason dialog; the request itself is sent by confirmReject. */
+  const rejectCr = (cr: ChangeRequest) => {
+    setRejectReason("");
+    setRejecting(cr);
+  };
+
+  const confirmReject = async () => {
+    const cr = rejecting;
+    if (!cr) return;
+    // The reason stays optional, as it was with the prompt.
+    const reason = rejectReason.trim() || undefined;
     setBusyId(cr.id);
     try {
       const res = await fetch("/api/vcs/reject", {
@@ -278,6 +291,7 @@ const Confirm = ({ group }: GroupProps) => {
       });
       if (res.ok) toast.success("Change request rejected");
       else toast.error("Failed to reject");
+      setRejecting(null);
       await loadCrs();
     } finally {
       setBusyId(null);
@@ -434,6 +448,53 @@ const Confirm = ({ group }: GroupProps) => {
           )}
         </div>
       </div>
+
+      {rejecting && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl dark:bg-gray-900">
+            <h3 className="mb-1 text-base font-semibold text-gray-900 dark:text-white">
+              Reject change request
+            </h3>
+            <p className="mb-3 truncate text-xs text-gray-500 dark:text-gray-400">
+              {rejecting.title}
+            </p>
+
+            <label
+              htmlFor="reject-reason"
+              className="mb-1 block text-sm text-gray-600 dark:text-gray-300"
+            >
+              Reason <span className="text-gray-400">(optional)</span>
+            </label>
+            <textarea
+              id="reject-reason"
+              autoFocus
+              rows={3}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Let the author know what needs changing"
+              className="mb-4 w-full resize-none rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+            />
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setRejecting(null)}
+                disabled={busyId === rejecting.id}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-700 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmReject}
+                disabled={busyId === rejecting.id}
+                aria-busy={busyId === rejecting.id}
+                className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-60"
+              >
+                {busyId === rejecting.id ? "Rejecting…" : "Reject"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

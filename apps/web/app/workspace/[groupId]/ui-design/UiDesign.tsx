@@ -3,12 +3,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { v4 as uuid } from "uuid";
-import type { Edge, Node, NodeChange, NodeTypes, OnSelectionChangeFunc } from "@xyflow/react";
+import type { Edge, Node, NodeChange, NodeTypes, OnSelectionChangeFunc, XYPosition } from "@xyflow/react";
 import { useWorkspaceBoard, type PeerCursorOp } from "../../lib/useWorkspaceBoard";
 import WorkspaceCanvas from "../../components/WorkspaceCanvas";
 import CursorLayer from "../../components/CursorLayer";
 import UiPalette from "./UiPalette";
 import UiPrimitiveNode, { UI_PALETTE, DEVICE_FRAMES, type UiKind } from "./UiPrimitiveNode";
+import UiGroupNode, { GROUP_HEADER_H, GROUP_PADDING } from "./UiGroupNode";
 import PropertiesPanel from "./PropertiesPanel";
 import BoardToolbar from "./BoardToolbar";
 import { buildTemplateNodes } from "./templates";
@@ -17,7 +18,7 @@ interface UiDesignProps {
   groupId: string;
 }
 
-const NODE_TYPES: NodeTypes = { uiPrimitive: UiPrimitiveNode };
+const NODE_TYPES: NodeTypes = { uiPrimitive: UiPrimitiveNode, uiGroup: UiGroupNode };
 const HISTORY_LIMIT = 50;
 
 type Snapshot = { nodes: Node[]; edges: Edge[] };
@@ -31,6 +32,29 @@ function cleanData(data: Record<string, unknown>) {
 function isTypingTarget(el: EventTarget | null) {
   const tag = (el as HTMLElement)?.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || (el as HTMLElement)?.isContentEditable;
+}
+
+// Same precedence the properties panel uses: an explicit style wins, and
+// measured is the fallback before the first render has sized the node.
+function nodeSize(n: Node) {
+  return {
+    width: ((n.style?.width as number) ?? n.measured?.width ?? 0) || 0,
+    height: ((n.style?.height as number) ?? n.measured?.height ?? 0) || 0,
+  };
+}
+
+// Bounding box of nodes that all share a coordinate space.
+function boundsOf(list: Node[]) {
+  const xs = list.map((n) => n.position.x);
+  const ys = list.map((n) => n.position.y);
+  const rights = list.map((n) => n.position.x + nodeSize(n).width);
+  const bottoms = list.map((n) => n.position.y + nodeSize(n).height);
+  return {
+    x: Math.min(...xs),
+    y: Math.min(...ys),
+    right: Math.max(...rights),
+    bottom: Math.max(...bottoms),
+  };
 }
 
 export default function UiDesign({ groupId }: UiDesignProps) {
@@ -59,6 +83,8 @@ export default function UiDesign({ groupId }: UiDesignProps) {
     addNodes,
     updateNode,
     updateNodeData,
+    groupNodes,
+    ungroupNodes,
     setGraph,
     sendCursor,
   } = useWorkspaceBoard({ groupId, type: "UI_DESIGN", slug: "ui-design", userId, onPeerCursor });
@@ -126,33 +152,137 @@ export default function UiDesign({ groupId }: UiDesignProps) {
 
   // ── Actions ──
   const duplicateSelection = useCallback(() => {
-    const selected = nodesRef.current.filter((n) => selectedIds.includes(n.id));
+    // Duplicating a group has to bring its members along, otherwise the copy
+    // is an empty frame.
+    const ids = new Set(selectedIds);
+    for (const n of nodesRef.current) {
+      if (n.parentId && ids.has(n.parentId)) ids.add(n.id);
+    }
+    const selected = nodesRef.current.filter((n) => ids.has(n.id));
     if (!selected.length) return;
     pushHistory();
-    const clones = selected.map((n) => ({
-      ...n,
-      id: uuid(),
-      position: { x: n.position.x + 16, y: n.position.y + 16 },
-      selected: false,
-      data: cleanData(n.data),
-    }));
+
+    // Clone ids first so a copied child can be re-pointed at the copied
+    // container rather than the original it was parented to.
+    const idMap = new Map(selected.map((n) => [n.id, uuid()]));
+    const clones = selected.map((n) => {
+      const clone: Node = {
+        ...n,
+        id: idMap.get(n.id)!,
+        selected: false,
+        data: cleanData(n.data),
+      };
+      if (n.parentId && idMap.has(n.parentId)) {
+        // Offsetting a child too would double-shift it: the parent already moved.
+        clone.parentId = idMap.get(n.parentId)!;
+      } else {
+        clone.position = { x: n.position.x + 16, y: n.position.y + 16 };
+      }
+      return clone;
+    });
+    // Parents must precede their children in the array.
+    clones.sort((a, b) => (a.parentId ? 1 : 0) - (b.parentId ? 1 : 0));
     addNodes(clones);
   }, [selectedIds, addNodes, pushHistory]);
 
   const deleteSelection = useCallback(() => {
     if (!selectedIds.length) return;
+    // Deleting a group takes its members with it — left behind, they'd keep a
+    // parentId pointing at a node that no longer exists and vanish from the
+    // canvas while still sitting in the saved graph.
+    const ids = new Set(selectedIds);
+    for (const n of nodesRef.current) {
+      if (n.parentId && ids.has(n.parentId)) ids.add(n.id);
+    }
+    const doomed = [...ids];
     const edgeRemovals = edgesRef.current
-      .filter((e) => selectedIds.includes(e.source) || selectedIds.includes(e.target))
+      .filter((e) => ids.has(e.source) || ids.has(e.target))
       .map((e) => ({ id: e.id, type: "remove" as const }));
     // handleNodesChange pushes history for remove changes
-    handleNodesChange(selectedIds.map((id) => ({ id, type: "remove" as const })));
+    handleNodesChange(doomed.map((id) => ({ id, type: "remove" as const })));
     if (edgeRemovals.length) onEdgesChange(edgeRemovals);
     setSelectedIds([]);
   }, [selectedIds, handleNodesChange, onEdgesChange]);
 
+  // ── Grouping ──
+  // Selection is groupable only when 2+ top-level nodes are picked. Nodes that
+  // already belong to a group are excluded: nesting isn't supported yet, and
+  // silently re-parenting them would tear them out of their current group.
+  const groupableIds = useMemo(() => {
+    const picked = nodes.filter((n) => selectedIds.includes(n.id));
+    if (picked.some((n) => n.parentId)) return [];
+    return picked.filter((n) => n.type !== "uiGroup").map((n) => n.id);
+  }, [nodes, selectedIds]);
+  const canGroup = groupableIds.length >= 2;
+
+  // Ungroup targets the selected container, or the container of a selected child.
+  const ungroupTargetId = useMemo(() => {
+    const picked = nodes.filter((n) => selectedIds.includes(n.id));
+    const container = picked.find((n) => n.type === "uiGroup");
+    if (container) return container.id;
+    const child = picked.find((n) => n.parentId);
+    return child?.parentId ?? null;
+  }, [nodes, selectedIds]);
+
+  const groupSelection = useCallback(() => {
+    const members = nodesRef.current.filter((n) => groupableIds.includes(n.id));
+    if (members.length < 2) return;
+
+    // Members are all top-level here, so their positions share one space.
+    const b = boundsOf(members);
+    const origin = { x: b.x - GROUP_PADDING, y: b.y - GROUP_HEADER_H };
+    const container: Node = {
+      id: uuid(),
+      type: "uiGroup",
+      position: origin,
+      // Behind its members so the frame never covers them.
+      zIndex: -1,
+      style: {
+        width: b.right - b.x + GROUP_PADDING * 2,
+        height: b.bottom - b.y + GROUP_HEADER_H + GROUP_PADDING,
+      },
+      data: { label: `Group ${nodesRef.current.filter((n) => n.type === "uiGroup").length + 1}` },
+    };
+
+    // A child's position becomes relative to its parent once parentId is set,
+    // so every member has to be rebased or it jumps on the next render.
+    const positions: Record<string, XYPosition> = {};
+    for (const m of members) {
+      positions[m.id] = { x: m.position.x - origin.x, y: m.position.y - origin.y };
+    }
+
+    pushHistory();
+    groupNodes(container, groupableIds, positions);
+    setSelectedIds([container.id]);
+  }, [groupableIds, groupNodes, pushHistory]);
+
+  const ungroupSelection = useCallback(() => {
+    if (!ungroupTargetId) return;
+    const container = nodesRef.current.find((n) => n.id === ungroupTargetId);
+    if (!container) return;
+
+    // Back to absolute before parentId is dropped, or the children collapse
+    // onto the canvas origin.
+    const positions: Record<string, XYPosition> = {};
+    for (const child of nodesRef.current.filter((n) => n.parentId === ungroupTargetId)) {
+      positions[child.id] = {
+        x: child.position.x + container.position.x,
+        y: child.position.y + container.position.y,
+      };
+    }
+
+    pushHistory();
+    ungroupNodes(ungroupTargetId, positions);
+    setSelectedIds(Object.keys(positions));
+  }, [ungroupTargetId, ungroupNodes, pushHistory]);
+
   const nudgeSelection = useCallback(
     (dx: number, dy: number) => {
-      const selected = nodesRef.current.filter((n) => selectedIds.includes(n.id));
+      // A child whose parent is also selected is skipped: React Flow already
+      // moves it with the parent, so nudging both would shift it twice.
+      const selected = nodesRef.current.filter(
+        (n) => selectedIds.includes(n.id) && !(n.parentId && selectedIds.includes(n.parentId)),
+      );
       if (!selected.length) return;
       onNodesChange(
         selected.map((n) => ({
@@ -182,6 +312,12 @@ export default function UiDesign({ groupId }: UiDesignProps) {
         else undo();
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "g") {
+        e.preventDefault();
+        if (e.shiftKey) ungroupSelection();
+        else groupSelection();
+        return;
+      }
       const step = e.shiftKey ? 10 : 2;
       if (e.key === "ArrowUp") { e.preventDefault(); nudgeSelection(0, -step); }
       else if (e.key === "ArrowDown") { e.preventDefault(); nudgeSelection(0, step); }
@@ -190,7 +326,7 @@ export default function UiDesign({ groupId }: UiDesignProps) {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [duplicateSelection, nudgeSelection, undo, redo]);
+  }, [duplicateSelection, nudgeSelection, undo, redo, groupSelection, ungroupSelection]);
 
   // ── Render ──
   const displayNodes = useMemo(
@@ -282,6 +418,10 @@ export default function UiDesign({ groupId }: UiDesignProps) {
           onRedo={redo}
           snap={snap}
           onToggleSnap={() => setSnap((s) => !s)}
+          canGroup={canGroup}
+          canUngroup={!!ungroupTargetId}
+          onGroup={groupSelection}
+          onUngroup={ungroupSelection}
         />
       }
       overlay={

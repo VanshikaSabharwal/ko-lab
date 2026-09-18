@@ -13,6 +13,7 @@ type CodeAccess = "NONE" | "PENDING_GITHUB" | "INVITED" | "ACTIVE";
 interface Member {
   id: string;
   name: string | null;
+  email: string | null;
   image: string | null;
   role: string;
   codeAccess: CodeAccess;
@@ -306,6 +307,12 @@ export default function CollaborationPanel({ groupId, repo }: CollaborationPanel
             {members.map((member) => {
               const meta = ACCESS_META[member.codeAccess];
               const isGroupOwner = member.role === "OWNER";
+              // Two accounts can share a display name. When they do, the email
+              // is the only thing that tells them apart, so it replaces the
+              // access hint for those rows only.
+              const nameIsAmbiguous =
+                !!member.name &&
+                members.filter((other) => other.name === member.name).length > 1;
               return (
                 <li
                   key={member.id}
@@ -315,13 +322,18 @@ export default function CollaborationPanel({ groupId, repo }: CollaborationPanel
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-medium text-gray-900 dark:text-white">
                       {member.name ?? "Unknown"}
-                      {isGroupOwner && (
-                        <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-gray-400">
-                          Owner
-                        </span>
-                      )}
+                      {/* The group owner is surfaced as Admin: the schema's
+                          GroupRole is ADMIN|MEMBER, and "Owner" was a third
+                          word for the same authority. Labelling every role —
+                          not just the owner's — also disambiguates two
+                          accounts that happen to share a display name. */}
+                      <span className="ml-1.5 text-[10px] font-normal uppercase tracking-wide text-gray-400">
+                        {isGroupOwner || member.role === "ADMIN" ? "Admin" : "Member"}
+                      </span>
                     </p>
-                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">{meta.hint}</p>
+                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                      {nameIsAmbiguous && member.email ? member.email : meta.hint}
+                    </p>
                   </div>
 
                   <span

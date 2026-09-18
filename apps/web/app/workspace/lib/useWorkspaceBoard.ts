@@ -11,6 +11,7 @@ import {
   type Node,
   type NodeChange,
   type NodePositionChange,
+  type XYPosition,
 } from "@xyflow/react";
 import { useWorkspaceSocket, type WorkspaceBoardType } from "./useWorkspaceSocket";
 
@@ -23,7 +24,18 @@ type GraphBoardOp =
   | { action: "node_update"; id: string; patch: Partial<Node> }
   | { action: "node_data_update"; id: string; data: Record<string, unknown> }
   | { action: "edge_label_update"; id: string; label: string }
-  | { action: "replace"; nodes: Node[]; edges: Edge[] };
+  | { action: "replace"; nodes: Node[]; edges: Edge[] }
+  // Grouping rewrites parentId on N nodes and inserts a container. Sent as one
+  // op so a concurrent peer edit can't land mid-rewrite and leave a half-formed
+  // group. `positions` carries the already-converted coordinates so every peer
+  // stores identical values instead of recomputing from its own local state.
+  | {
+      action: "group_nodes";
+      container: Node;
+      childIds: string[];
+      positions: Record<string, XYPosition>;
+    }
+  | { action: "ungroup_nodes"; containerId: string; positions: Record<string, XYPosition> };
 
 // Transient ops (cursors etc.) share the WS channel but never touch board state.
 export interface PeerCursorOp {
@@ -46,6 +58,46 @@ interface UseWorkspaceBoardOptions {
 const SAVE_DEBOUNCE_MS = 1500;
 // Matches the cadence CursorLayer already uses for its own throttled sends.
 const DRAG_BROADCAST_MS = 50;
+
+// React Flow requires a parent node to sit before its children in the array,
+// otherwise the children silently fail to render. Both helpers below preserve
+// that invariant, and are shared by the local and remote paths so the two can
+// never drift apart.
+function applyGroupNodes(
+  nds: Node[],
+  container: Node,
+  childIds: string[],
+  positions: Record<string, XYPosition>,
+): Node[] {
+  const ids = new Set(childIds);
+  const children: Node[] = [];
+  const rest: Node[] = [];
+  for (const n of nds) {
+    if (ids.has(n.id)) {
+      children.push({ ...n, parentId: container.id, position: positions[n.id] ?? n.position });
+    } else {
+      rest.push(n);
+    }
+  }
+  // Container first, then its members, then everything else.
+  return [container, ...children, ...rest];
+}
+
+function applyUngroupNodes(
+  nds: Node[],
+  containerId: string,
+  positions: Record<string, XYPosition>,
+): Node[] {
+  return nds
+    .filter((n) => n.id !== containerId)
+    .map((n) => {
+      if (n.parentId !== containerId) return n;
+      // parentId must be dropped, not set to undefined on a spread copy only —
+      // a lingering key would keep React Flow treating the node as parented.
+      const { parentId: _parentId, extent: _extent, ...rest } = n;
+      return { ...rest, position: positions[n.id] ?? n.position } as Node;
+    });
+}
 
 // Shared load/save/sync logic for the three node-graph workspace boards
 // (mind map, DB schema, UI design). Planning & milestones uses its own
@@ -94,6 +146,12 @@ export function useWorkspaceBoard({ groupId, type, slug, userId, onPeerCursor }:
         break;
       case "edge_label_update":
         setEdges((eds) => eds.map((e) => (e.id === op.id ? { ...e, label: op.label } : e)));
+        break;
+      case "group_nodes":
+        setNodes((nds) => applyGroupNodes(nds, op.container, op.childIds, op.positions));
+        break;
+      case "ungroup_nodes":
+        setNodes((nds) => applyUngroupNodes(nds, op.containerId, op.positions));
         break;
     }
   }, []);
@@ -257,6 +315,22 @@ export function useWorkspaceBoard({ groupId, type, slug, userId, onPeerCursor }:
     [sendOp],
   );
 
+  const groupNodes = useCallback(
+    (container: Node, childIds: string[], positions: Record<string, XYPosition>) => {
+      setNodes((nds) => applyGroupNodes(nds, container, childIds, positions));
+      sendOp({ action: "group_nodes", container, childIds, positions });
+    },
+    [sendOp],
+  );
+
+  const ungroupNodes = useCallback(
+    (containerId: string, positions: Record<string, XYPosition>) => {
+      setNodes((nds) => applyUngroupNodes(nds, containerId, positions));
+      sendOp({ action: "ungroup_nodes", containerId, positions });
+    },
+    [sendOp],
+  );
+
   // Replace the whole graph (undo/redo, template insertion into empty board)
   const setGraph = useCallback(
     (nextNodes: Node[], nextEdges: Edge[]) => {
@@ -291,6 +365,8 @@ export function useWorkspaceBoard({ groupId, type, slug, userId, onPeerCursor }:
     updateNode,
     updateNodeData,
     updateEdgeLabel,
+    groupNodes,
+    ungroupNodes,
     setGraph,
     sendCursor,
   };

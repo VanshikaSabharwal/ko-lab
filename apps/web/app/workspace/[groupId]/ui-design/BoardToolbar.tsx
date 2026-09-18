@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { getNodesBounds, getViewportForBounds, useReactFlow } from "@xyflow/react";
 import { useTheme } from "next-themes";
 import { toPng } from "html-to-image";
-import { Undo2, Redo2, Magnet, ImageDown } from "lucide-react";
+import { Undo2, Redo2, Magnet, ImageDown, Group, Ungroup } from "lucide-react";
 import toast from "react-hot-toast";
 
 interface BoardToolbarProps {
@@ -14,6 +14,10 @@ interface BoardToolbarProps {
   onRedo: () => void;
   snap: boolean;
   onToggleSnap: () => void;
+  canGroup: boolean;
+  canUngroup: boolean;
+  onGroup: () => void;
+  onUngroup: () => void;
 }
 
 const btnCls =
@@ -26,6 +30,10 @@ export default function BoardToolbar({
   onRedo,
   snap,
   onToggleSnap,
+  canGroup,
+  canUngroup,
+  onGroup,
+  onUngroup,
 }: BoardToolbarProps) {
   const { getNodes } = useReactFlow();
   const { resolvedTheme } = useTheme();
@@ -77,6 +85,22 @@ export default function BoardToolbar({
       </button>
       <button className={btnCls} onClick={onRedo} disabled={!canRedo} title="Redo">
         <Redo2 size={13} /> <span className="hidden sm:inline">Redo</span>
+      </button>
+      <button
+        className={btnCls}
+        onClick={onGroup}
+        disabled={!canGroup}
+        title="Group selection (Ctrl+G)"
+      >
+        <Group size={13} /> <span className="hidden sm:inline">Group</span>
+      </button>
+      <button
+        className={btnCls}
+        onClick={onUngroup}
+        disabled={!canUngroup}
+        title="Ungroup (Ctrl+Shift+G)"
+      >
+        <Ungroup size={13} /> <span className="hidden sm:inline">Ungroup</span>
       </button>
       <button
         className={`${btnCls} ${snap ? "border-blue-600/60 text-blue-300" : ""}`}

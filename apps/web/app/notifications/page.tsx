@@ -47,8 +47,10 @@ const NotificationsPage = () => {
   const userId = session?.user.id;
 
   useEffect(() => {
-    const fetchNotifications = async () => {
-      setLoading(true);
+    // `background` refetches without flipping back to the loading screen, so a
+    // live update doesn't blank out the list the user is already reading.
+    const fetchNotifications = async ({ background = false } = {}) => {
+      if (!background) setLoading(true);
       setError(null);
       try {
         // Fetch my phone number first for DM notifications
@@ -78,7 +80,16 @@ const NotificationsPage = () => {
         setLoading(false);
       }
     };
-    if (userId) fetchNotifications();
+    if (!userId) return;
+
+    fetchNotifications();
+
+    // A notification pushed over the socket while this page is open should
+    // appear without a manual reload. CallProvider holds the app-wide socket
+    // and re-emits what it receives as this event.
+    const onPushed = () => fetchNotifications({ background: true });
+    window.addEventListener("ko-lab:notification", onPushed);
+    return () => window.removeEventListener("ko-lab:notification", onPushed);
   }, [userId]);
 
   if (loading)

@@ -12,6 +12,8 @@ import Cookies from "js-cookie";
 import toast from "react-hot-toast";
 import demoTestimonal from "../../../../data/demo-testimonial.json";
 import SiteTour from "./SiteTour";
+import AssistantShowcase from "./AssistantShowcase";
+import AssistantChat from "./AssistantChat";
 
 interface GuestData {
   guestId: string;
@@ -105,57 +107,74 @@ const HeroSection = () => {
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-[#829797] dark:from-gray-900 dark:to-black text-gray-900 dark:text-white">
       <SiteTour />
 
-      {/* Hero */}
-      <section className="px-4 sm:px-6 lg:px-8 pt-14 pb-10 sm:pt-20 sm:pb-16 max-w-5xl mx-auto text-center">
-        <motion.div
-          initial={{ opacity: 0, y: 16 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-        >
-          <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-extrabold leading-tight mb-4">
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-600">
-              Ko-Lab:
-            </span>{" "}
-            <span className="bg-clip-text text-transparent bg-gradient-to-r from-gray-800 to-gray-600 dark:from-white dark:to-gray-300">
-              Code, Collaborate, and Chat
-            </span>
-          </h1>
+      {/* Hero with Assistant Chat */}
+      <section className="px-4 sm:px-6 lg:px-8 pt-14 pb-10 sm:pt-20 sm:pb-16 max-w-6xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
+          {/* Left: Text Content */}
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+            className="text-center lg:text-left"
+          >
+            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-5xl font-extrabold leading-tight mb-4">
+              <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-600">
+                Ko-Lab:
+              </span>{" "}
+              <span className="bg-clip-text text-transparent bg-gradient-to-r from-gray-800 to-gray-600 dark:from-white dark:to-gray-300">
+                Code, Collaborate, and Chat
+              </span>
+            </h1>
 
-          <p className="text-sm sm:text-base md:text-lg text-gray-500 dark:text-gray-400 max-w-xl mx-auto mb-8">
-            Seamless collaboration with real-time coding, one-on-one and group chat — all in one platform.
-          </p>
+            <p className="text-sm sm:text-base md:text-lg text-gray-500 dark:text-gray-400 mb-8">
+              Seamless collaboration with real-time coding, one-on-one and group chat — all in one platform.
+            </p>
 
-          <div id="tour-cta" className="flex flex-wrap items-center justify-center gap-3">
-            {session || guestData ? (
+            <div id="tour-cta" className="flex flex-wrap items-center justify-center lg:justify-start gap-3">
+              {session || guestData ? (
+                <Link
+                  href="/chat-room"
+                  className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-semibold hover:opacity-90 transition shadow-md"
+                >
+                  Go to Chat Room
+                </Link>
+              ) : (
+                <Link
+                  href="/signup"
+                  className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-semibold hover:opacity-90 transition shadow-md"
+                >
+                  Get Started
+                </Link>
+              )}
               <Link
-                href="/chat-room"
-                className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-semibold hover:opacity-90 transition shadow-md"
+                href="/github"
+                className="px-5 py-2.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-lg text-sm font-semibold border border-gray-200 dark:border-gray-700 hover:border-purple-400 dark:hover:border-purple-400 transition shadow-sm"
               >
-                Go to Chat Room
+                Create a Group
               </Link>
-            ) : (
               <Link
-                href="/signup"
-                className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-semibold hover:opacity-90 transition shadow-md"
+                href="/groups"
+                className="px-5 py-2.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-lg text-sm font-semibold border border-gray-200 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-400 transition shadow-sm"
               >
-                Get Started
+                My Groups
               </Link>
-            )}
-            <Link
-              href="/github"
-              className="px-5 py-2.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-lg text-sm font-semibold border border-gray-200 dark:border-gray-700 hover:border-purple-400 dark:hover:border-purple-400 transition shadow-sm"
+            </div>
+          </motion.div>
+
+          {/* Right: Assistant Chat (only for authenticated users) */}
+          {session && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ duration: 0.6, delay: 0.2 }}
             >
-              Create a Group
-            </Link>
-            <Link
-              href="/groups"
-              className="px-5 py-2.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-lg text-sm font-semibold border border-gray-200 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-400 transition shadow-sm"
-            >
-              My Groups
-            </Link>
-          </div>
-        </motion.div>
+              <AssistantChat />
+            </motion.div>
+          )}
+        </div>
       </section>
+
+      <AssistantShowcase />
 
       {/* Feature cards */}
       <section className="px-4 sm:px-6 lg:px-8 pb-12 sm:pb-16 max-w-5xl mx-auto">
