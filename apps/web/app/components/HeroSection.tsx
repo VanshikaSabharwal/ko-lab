@@ -12,7 +12,6 @@ import Cookies from "js-cookie";
 import toast from "react-hot-toast";
 import demoTestimonal from "../../../../data/demo-testimonial.json";
 import SiteTour from "./SiteTour";
-import AssistantShowcase from "./AssistantShowcase";
 import AssistantChat from "./AssistantChat";
 
 interface GuestData {
@@ -117,7 +116,7 @@ const HeroSection = () => {
             transition={{ duration: 0.6 }}
             className="text-center lg:text-left"
           >
-            <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-5xl font-extrabold leading-tight mb-4">
+            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold leading-tight mb-6">
               <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-600">
                 Ko-Lab:
               </span>{" "}
@@ -126,7 +125,7 @@ const HeroSection = () => {
               </span>
             </h1>
 
-            <p className="text-sm sm:text-base md:text-lg text-gray-500 dark:text-gray-400 mb-8">
+            <p className="text-base sm:text-lg md:text-xl text-gray-500 dark:text-gray-400 mb-8">
               Seamless collaboration with real-time coding, one-on-one and group chat — all in one platform.
             </p>
 
@@ -173,8 +172,6 @@ const HeroSection = () => {
           )}
         </div>
       </section>
-
-      <AssistantShowcase />
 
       {/* Feature cards */}
       <section className="px-4 sm:px-6 lg:px-8 pb-12 sm:pb-16 max-w-5xl mx-auto">
