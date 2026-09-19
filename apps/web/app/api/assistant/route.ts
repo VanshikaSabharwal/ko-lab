@@ -307,7 +307,7 @@ export async function POST(request: Request) {
     }
 
     let response = await groq.chat.completions.create({
-      model: "llama-3.1-70b-versatile",
+      model: "openai/gpt-oss-20b", // High-quality open-source model on Groq
       messages: messages as any,
       tools: tools as unknown as Groq.Chat.ChatCompletionTool[],
       tool_choice: "auto",
@@ -372,7 +372,7 @@ export async function POST(request: Request) {
 
       // Continue conversation
       response = await groq.chat.completions.create({
-        model: "llama-3.1-70b-versatile",
+        model: "openai/gpt-oss-20b",
         messages: newMessages,
         tools: tools as unknown as Groq.Chat.ChatCompletionTool[],
         tool_choice: "auto",
