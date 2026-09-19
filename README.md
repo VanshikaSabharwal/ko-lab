@@ -9,10 +9,12 @@ A real-time collaborative code editor with group workspaces, GitHub integration,
 - **Change request workflow** — members submit code changes, the group owner reviews and approves or rejects them; history is preserved
 - **GitHub integration** — link any GitHub repo to a group; commits and file modifications sync back to GitHub via the Octokit REST API
 - **SSH key management** — generate and register an SSH key from within the app to authorise pushes to GitHub
+- **AI Assistant: "What did I miss?"** — LLM-powered chatbot (Groq) that queries your workspace across groups, tasks, code changes, and calls in one question
 
-### Groups
+### Groups & Notifications
 - **Create a group** — attach a GitHub repo, name the group, and invite members by phone number
 - **Group chat** — real-time messaging with emoji reactions, message status (sending / delivered / read), background themes, and browser push notifications
+- **Live notifications** — instant push to open WebSocket connections; fallback to DB persistence for offline users
 - **Member roles** — ADMIN (owner) and MEMBER; only the owner can add members and approve changes
 - **Guest access** — time-limited guest sessions for read-only collaboration without an account
 
@@ -50,6 +52,7 @@ A real-time collaborative code editor with group workspaces, GitHub integration,
 | Database | PostgreSQL + Prisma 5 |
 | Auth | NextAuth v4 (GitHub OAuth, Google OAuth) |
 | Real-time | WebSocket server (`apps/web-socket`) |
+| LLM | Groq (`openai/gpt-oss-20b`) + tool calling |
 | Styling | Tailwind CSS 3 |
 | Editor | CodeMirror 6 via `@uiw/react-codemirror` |
 | GitHub API | Octokit REST |
@@ -57,6 +60,7 @@ A real-time collaborative code editor with group workspaces, GitHub integration,
 | Animations | Framer Motion |
 | Onboarding | Shepherd.js |
 | Notifications | React Hot Toast + Web Notifications API |
+| Voice input | Web Speech API (browser native) |
 
 ---
 
@@ -115,6 +119,9 @@ GOOGLE_CLIENT_SECRET=your-google-client-secret
 NEXT_PUBLIC_WEB_SOCKET_URL=ws://localhost:8080
 ALLOWED_ORIGINS=http://localhost:3000
 
+# Groq (for AI assistant — optional, assistant disabled if unset)
+GROQ_API_KEY=gsk_your-key-here
+
 # S3 (LocalStack in development — see below).
 # The credentials are placeholders: LocalStack accepts any value.
 S3_ENDPOINT=http://localhost:4566
@@ -123,6 +130,10 @@ S3_FORCE_PATH_STYLE=true
 AWS_REGION=us-east-1
 AWS_ACCESS_KEY_ID=test
 AWS_SECRET_ACCESS_KEY=test
+
+# Service-to-service (optional, live notifications disabled if unset)
+GIT_SERVICE_URL=http://localhost:8080
+GIT_SERVICE_SECRET=your-secret-key
 ```
 
 ### Install & Run
@@ -177,11 +188,13 @@ npm start
 | Method | Route | Description |
 |---|---|---|
 | GET/POST | `/api/auth/[...nextauth]` | NextAuth session handling |
+| POST | `/api/assistant` | LLM-powered chatbot (Groq tool calling) |
 | GET/POST | `/api/profile` | Get and update user profile |
 | GET/POST | `/api/friends` | List friends / add a friend by phone |
 | POST | `/api/friend-search` | Find a user by phone number |
 | POST | `/api/set-phone` | Save the current user's phone number |
 | GET | `/api/get-user-number` | Look up a user by email, id, or phone |
+| GET | `/api/lookup-user` | Check if user exists by email (combined endpoint) |
 | POST | `/api/create-group-data` | Create a group linked to a GitHub repo |
 | GET | `/api/my-groups` | List groups the user owns or belongs to |
 | GET | `/api/check-group-member` | Check if a user is a group member |
