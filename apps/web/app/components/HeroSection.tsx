@@ -107,16 +107,16 @@ const HeroSection = () => {
       <SiteTour />
 
       {/* Hero with Assistant Chat */}
-      <section className="px-4 sm:px-6 lg:px-8 pt-14 pb-10 sm:pt-20 sm:pb-16 max-w-6xl mx-auto">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
+      <section className="px-4 sm:px-6 lg:px-8 py-16 sm:py-20 lg:py-24 min-h-[90vh] flex items-center">
+        <div className="w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
           {/* Left: Text Content */}
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="text-center lg:text-left"
+            className="text-center lg:text-left space-y-8"
           >
-            <h1 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-extrabold leading-tight mb-6">
+            <h1 className="text-5xl sm:text-6xl md:text-6xl lg:text-7xl font-extrabold leading-tight tracking-tight">
               <span className="bg-clip-text text-transparent bg-gradient-to-r from-blue-500 to-purple-600">
                 Ko-Lab:
               </span>{" "}
@@ -125,35 +125,35 @@ const HeroSection = () => {
               </span>
             </h1>
 
-            <p className="text-base sm:text-lg md:text-xl text-gray-500 dark:text-gray-400 mb-8">
+            <p className="text-lg sm:text-xl text-gray-600 dark:text-gray-300 leading-relaxed max-w-lg">
               Seamless collaboration with real-time coding, one-on-one and group chat — all in one platform.
             </p>
 
-            <div id="tour-cta" className="flex flex-wrap items-center justify-center lg:justify-start gap-3">
+            <div id="tour-cta" className="flex flex-wrap items-center justify-center lg:justify-start gap-3 pt-6">
               {session || guestData ? (
                 <Link
                   href="/chat-room"
-                  className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-semibold hover:opacity-90 transition shadow-md"
+                  className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-semibold hover:shadow-lg hover:shadow-blue-500/30 transition-all"
                 >
                   Go to Chat Room
                 </Link>
               ) : (
                 <Link
                   href="/signup"
-                  className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-semibold hover:opacity-90 transition shadow-md"
+                  className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg text-sm font-semibold hover:shadow-lg hover:shadow-blue-500/30 transition-all"
                 >
                   Get Started
                 </Link>
               )}
               <Link
                 href="/github"
-                className="px-5 py-2.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-lg text-sm font-semibold border border-gray-200 dark:border-gray-700 hover:border-purple-400 dark:hover:border-purple-400 transition shadow-sm"
+                className="px-6 py-2.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-lg text-sm font-semibold border border-gray-200 dark:border-gray-700 hover:shadow-md transition-all"
               >
                 Create a Group
               </Link>
               <Link
                 href="/groups"
-                className="px-5 py-2.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-lg text-sm font-semibold border border-gray-200 dark:border-gray-700 hover:border-indigo-400 dark:hover:border-indigo-400 transition shadow-sm"
+                className="px-6 py-2.5 bg-white dark:bg-gray-800 text-gray-800 dark:text-white rounded-lg text-sm font-semibold border border-gray-200 dark:border-gray-700 hover:shadow-md transition-all"
               >
                 My Groups
               </Link>
@@ -166,8 +166,11 @@ const HeroSection = () => {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               transition={{ duration: 0.6, delay: 0.2 }}
+              className="h-full"
             >
-              <AssistantChat />
+              <div className="h-full lg:min-h-96">
+                <AssistantChat />
+              </div>
             </motion.div>
           )}
         </div>

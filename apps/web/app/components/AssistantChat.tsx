@@ -161,14 +161,14 @@ export default function AssistantChat() {
   };
 
   return (
-    <div className="flex flex-col h-96 bg-white dark:bg-gray-800/60 border border-gray-200 dark:border-gray-700 rounded-xl shadow-sm overflow-hidden">
+    <div className="flex flex-col h-full min-h-[480px] bg-white dark:bg-gray-800/40 backdrop-blur border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl overflow-hidden">
       {/* Header */}
-      <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-gray-900/50 dark:to-gray-800/50">
+      <div className="p-6 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-gray-900/50 dark:to-gray-800/50">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-blue-500" />
-          <h3 className="text-sm font-semibold">Ko-Lab Assistant</h3>
+          <Sparkles className="w-5 h-5 text-blue-500" />
+          <h3 className="text-base font-semibold">Ko-Lab Assistant</h3>
         </div>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+        <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
           Ask about your groups, tasks, or recent changes
         </p>
       </div>
@@ -179,11 +179,11 @@ export default function AssistantChat() {
         className="flex-1 overflow-y-auto p-4 space-y-3"
       >
         {messages.length === 0 ? (
-          <div className="space-y-3">
-            <p className="text-center text-gray-400 dark:text-gray-500 text-xs mt-4">
+          <div className="space-y-4">
+            <p className="text-center text-gray-500 dark:text-gray-400 text-sm font-medium mt-6">
               Quick questions:
             </p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               {[
                 "What did I miss?",
                 "Show my groups",
@@ -203,7 +203,7 @@ export default function AssistantChat() {
                       );
                     }, 0);
                   }}
-                  className="px-2 py-1.5 text-xs bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition"
+                  className="px-3 py-2.5 text-sm bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700 rounded-lg text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition font-medium"
                 >
                   {prompt}
                 </button>

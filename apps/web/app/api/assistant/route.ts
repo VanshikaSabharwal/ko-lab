@@ -1,6 +1,6 @@
 import { getServerSession } from "next-auth";
-import { prisma } from "@/app/lib/prisma";
-import { authOptions } from "@/app/lib/auth";
+import prisma from "../../lib/prisma";
+import { authOptions } from "../../lib/auth";
 import { Groq } from "groq-sdk";
 
 const groq = new Groq({
