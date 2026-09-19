@@ -297,9 +297,18 @@ export async function POST(request: Request) {
     }
 
     const userId = session.user.id;
+
+    // Validate message format
+    if (!messages.every((m: any) => m.role && m.content)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid message format: each message must have role and content" }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
     let response = await groq.chat.completions.create({
-      model: "mixtral-8x7b-32768", // Faster, 32K context, widely available
-      messages: messages,
+      model: "llama-3.1-70b-versatile",
+      messages: messages as any,
       tools: tools as unknown as Groq.Chat.ChatCompletionTool[],
       tool_choice: "auto",
       max_tokens: 1024,
@@ -363,7 +372,7 @@ export async function POST(request: Request) {
 
       // Continue conversation
       response = await groq.chat.completions.create({
-        model: "mixtral-8x7b-32768",
+        model: "llama-3.1-70b-versatile",
         messages: newMessages,
         tools: tools as unknown as Groq.Chat.ChatCompletionTool[],
         tool_choice: "auto",
@@ -385,6 +394,7 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("Assistant API error:", error);
     return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
