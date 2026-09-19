@@ -356,18 +356,13 @@ export async function POST(request: Request) {
         },
       ];
 
-      // Add tool results
+      // Add tool results (OpenAI/Groq format: role:tool with string content)
       toolResults.forEach((tr) => {
         newMessages.push({
-          role: "user" as const,
-          content: [
-            {
-              type: "tool_result" as const,
-              tool_use_id: tr.tool_call_id,
-              content: JSON.stringify(tr.result),
-            },
-          ],
-        });
+          role: "tool" as const,
+          tool_call_id: tr.tool_call_id,
+          content: JSON.stringify(tr.result),
+        } as any);
       });
 
       // Continue conversation
