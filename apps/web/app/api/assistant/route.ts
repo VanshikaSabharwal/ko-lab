@@ -298,7 +298,7 @@ export async function POST(request: Request) {
 
     const userId = session.user.id;
     let response = await groq.chat.completions.create({
-      model: "llama-3.3-70b-versatile",
+      model: "mixtral-8x7b-32768", // Faster, 32K context, widely available
       messages: messages,
       tools: tools as unknown as Groq.Chat.ChatCompletionTool[],
       tool_choice: "auto",
@@ -363,7 +363,7 @@ export async function POST(request: Request) {
 
       // Continue conversation
       response = await groq.chat.completions.create({
-        model: "llama-3.3-70b-versatile",
+        model: "mixtral-8x7b-32768",
         messages: newMessages,
         tools: tools as unknown as Groq.Chat.ChatCompletionTool[],
         tool_choice: "auto",
