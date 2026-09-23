@@ -4,7 +4,7 @@ import { useSession, signIn } from "next-auth/react";
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { FaGithub, FaGoogle } from "react-icons/fa";
-import { CheckCircle, User, Bell, BellOff } from "lucide-react";
+import { CheckCircle, User, Bell, BellOff, Pencil, Loader2 } from "lucide-react";
 import Image from "next/image";
 
 type ProfileData = {
@@ -128,9 +128,12 @@ export default function ProfilePage() {
   }, [status]);
 
   const handleAvatarUpload = async (file: File) => {
+    if (avatarPreview) URL.revokeObjectURL(avatarPreview);
     const objectUrl = URL.createObjectURL(file);
     setAvatarPreview(objectUrl);
     setUploadingAvatar(true);
+    const toastId = toast.loading("Uploading avatar…");
+    let succeeded = false;
     try {
       const formData = new FormData();
       formData.append("file", file);
@@ -140,18 +143,23 @@ export default function ProfilePage() {
       });
       if (res.ok) {
         const { image } = await res.json();
-        toast.success("Avatar updated");
+        toast.success("Avatar updated", { id: toastId });
         setProfile((p) => (p ? { ...p, image } : p));
+        succeeded = true;
       } else {
-        const d = await res.json();
-        toast.error(d.error ?? "Failed to upload avatar");
+        const d = await res.json().catch(() => ({}));
+        toast.error(d.error ?? "Failed to upload avatar", { id: toastId });
       }
     } catch {
-      toast.error("Failed to upload avatar");
+      toast.error("Failed to upload avatar", { id: toastId });
     } finally {
       setUploadingAvatar(false);
-      URL.revokeObjectURL(objectUrl);
-      setAvatarPreview(null);
+      // On success keep showing the local preview; swapping straight to the
+      // remote URL makes the avatar blank while it downloads.
+      if (!succeeded) {
+        URL.revokeObjectURL(objectUrl);
+        setAvatarPreview(null);
+      }
     }
   };
 
@@ -208,7 +216,10 @@ export default function ProfilePage() {
 
         {/* Avatar + name */}
         <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm p-6 flex items-center gap-4">
-          <label className="relative cursor-pointer group shrink-0">
+          <label
+            title="Change profile photo"
+            className={`relative group shrink-0 ${uploadingAvatar ? "cursor-wait" : "cursor-pointer"}`}
+          >
             {avatarPreview || profile!.image ? (
               <Image
                 src={avatarPreview ?? profile!.image!}
@@ -223,9 +234,21 @@ export default function ProfilePage() {
                 <User className="w-8 h-8 text-gray-400" />
               </div>
             )}
-            <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs font-medium">
-              {uploadingAvatar ? "…" : "Edit"}
+            <div
+              className={`absolute inset-0 rounded-full bg-black/40 transition flex items-center justify-center text-white text-xs font-medium ${
+                uploadingAvatar ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+              }`}
+            >
+              {uploadingAvatar ? <Loader2 className="w-5 h-5 animate-spin" /> : "Change"}
             </div>
+            {!uploadingAvatar && (
+              <span
+                aria-hidden
+                className="absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full bg-blue-600 border-2 border-white dark:border-gray-900 flex items-center justify-center shadow"
+              >
+                <Pencil className="w-3 h-3 text-white" />
+              </span>
+            )}
             <input
               type="file"
               accept="image/png,image/jpeg,image/webp"
