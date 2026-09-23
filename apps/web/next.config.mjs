@@ -86,6 +86,17 @@ const callHeaders = [
   },
 ];
 
+// The home page hosts the assistant's voice input, which needs the mic but
+// never the camera.
+const ASSISTANT_ROUTES = ["/"];
+
+const assistantHeaders = [
+  {
+    key: "Permissions-Policy",
+    value: "camera=(), microphone=(self), geolocation=(), interest-cohort=()",
+  },
+];
+
 const nextConfig = {
   headers: async () => [
     {
@@ -96,6 +107,7 @@ const nextConfig = {
     // Re-grant camera/mic only on call-capable routes. Listed after the
     // catch-all so these values override the deny above.
     ...CALL_ROUTES.map((source) => ({ source, headers: callHeaders })),
+    ...ASSISTANT_ROUTES.map((source) => ({ source, headers: assistantHeaders })),
     {
       // CORS for your API routes — only allow your own origin
       source: "/api/(.*)",

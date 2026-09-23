@@ -41,10 +41,28 @@ model User {
   authoredChangeRequests ChangeRequest[]    @relation("AuthoredChangeRequests")
   bugReports             BugReport[]        @relation("UserBugReports")
   planningAssignments    PlanningAssignee[] @relation("UserPlanningAssignments")
+  assistantConversations AssistantConversation[] @relation("UserAssistantConversations")
 
   // Add timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// One Ko-Lab Assistant chat. Each user message spends one credit; when the
+// allowance is used up the user starts a new conversation. creditsTotal is
+// stored per row so changing the default doesn't alter conversations already
+// in progress.
+model AssistantConversation {
+  id           String   @id @default(cuid())
+  userId       String
+  creditsTotal Int
+  creditsUsed  Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation("UserAssistantConversations", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 // === NEXTAUTH MODELS ===

@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useTheme } from "next-themes";
-import { Menu, Search, Settings, Moon, Sun, Check, Loader2, WifiOff } from "lucide-react";
+import { Menu, Search, Moon, Sun, Check, Loader2, WifiOff } from "lucide-react";
 import Avatar, { type AvatarUser } from "./Avatar";
 import AvatarStack from "./AvatarStack";
 import { cn } from "../../lib/utils";
@@ -196,14 +196,6 @@ export default function WorkspaceTopBar({
         >
           {resolvedTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
-
-        <Link
-          href="/profile"
-          aria-label="Settings"
-          className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
-        >
-          <Settings size={16} />
-        </Link>
 
         <Link href="/profile" className="flex items-center gap-2 rounded-md px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800">
           <Avatar user={user} size={28} />

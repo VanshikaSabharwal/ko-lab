@@ -290,7 +290,7 @@ export default function WorkspaceDetailsPanel({
             New milestone
           </button>
           <a
-            href={`/code-editor/${groupId}`}
+            href={`/viewMembers/${groupId}`}
             className="flex w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-2.5 py-2 text-xs text-gray-700 hover:border-blue-500/60 hover:text-gray-900 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300 dark:hover:text-white"
           >
             <UserPlus size={13} />

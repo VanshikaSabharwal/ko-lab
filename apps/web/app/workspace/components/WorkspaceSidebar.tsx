@@ -7,7 +7,6 @@ import {
   LayoutGrid,
   KanbanSquare,
   ListTodo,
-  Settings,
   MessageSquareHeart,
   LogOut,
   X,
@@ -32,8 +31,8 @@ interface WorkspaceSidebarProps {
 }
 
 /**
- * Nav entries. Only Overview and Planning have routes today — the rest render
- * visibly disabled rather than as links to nowhere.
+ * Nav entries. Only Overview and Planning have routes today — Tasks renders
+ * visibly disabled rather than as a link to nowhere.
  */
 const NAV = [
   { key: "overview", label: "Overview", icon: LayoutGrid, href: (g: string) => `/workspace/${g}` },
@@ -44,7 +43,6 @@ const NAV = [
     href: (g: string) => `/workspace/${g}/planning`,
   },
   { key: "tasks", label: "Tasks", icon: ListTodo, href: null },
-  { key: "settings", label: "Settings", icon: Settings, href: null },
 ] as const;
 
 export default function WorkspaceSidebar({
