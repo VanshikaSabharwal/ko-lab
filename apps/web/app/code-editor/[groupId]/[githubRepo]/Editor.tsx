@@ -688,6 +688,9 @@ export default function Editor({ github, group }: CodeProps) {
     // the sidebar. Naming the file is loadFileContent's job, and only once the
     // content actually arrives.
     expandToFile(file.path);
+    // From Terminal, Settings etc. the editor is hidden, so the file would load
+    // out of sight. The terminal stays mounted, so its shell keeps running.
+    setIdeSection("files");
     await loadFileContent(file);
   };
 
@@ -873,6 +876,7 @@ export default function Editor({ github, group }: CodeProps) {
     setFiles((prev) => [...prev, file]);
     setNewFilePath(null);
     setFileSearch("");
+    setIdeSection("files");
     expandToFile(path);
     void loadFileContent(file);
   };

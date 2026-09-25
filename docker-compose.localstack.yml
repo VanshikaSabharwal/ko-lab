@@ -30,7 +30,8 @@ services:
     entrypoint: ["sh", "-c"]
     command:
       - >
-        aws --endpoint-url=http://localstack:4566 s3 mb s3://${S3_BUCKET:-avatars} || true
+        aws --endpoint-url=http://localstack:4566 s3 mb s3://${S3_BUCKET:-avatars} || true;
+        aws --endpoint-url=http://localstack:4566 s3 mb s3://${DRAFT_BUCKET:-ko-lab-drafts} || true
 
 volumes:
   localstack_data:

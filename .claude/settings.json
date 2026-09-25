@@ -23,7 +23,10 @@
       "Bash(curl -sI \"http://localhost:3000/_next/static/chunks/app_f9438b._.js\")",
       "Bash(grep -rhoE 'https://[^\"`'\"'\"' ]+' index.js)",
       "Bash(curl -s -m 5 localhost:8080/health)",
-      "Bash(grep -v \"^$\")"
+      "Bash(grep -v \"^$\")",
+      "Bash(curl -s -m 3 localhost:4566/_localstack/health)",
+      "Bash(docker exec *)",
+      "Bash(docker compose *)"
     ]
   }
 }
