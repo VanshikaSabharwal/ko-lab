@@ -2,7 +2,13 @@ import { promises as fs } from "fs";
 import path from "path";
 import { simpleGit, SimpleGit } from "simple-git";
 
-export const WORKSPACE_ROOT = process.env.GIT_WORKSPACE_ROOT || "/data/workspaces";
+// /data is Render's persistent disk. It doesn't exist on a dev machine, and a
+// normal user can't create it, so locally the clones go in a gitignored folder.
+export const WORKSPACE_ROOT =
+  process.env.GIT_WORKSPACE_ROOT ||
+  (process.env.RENDER || process.env.NODE_ENV === "production"
+    ? "/data/workspaces"
+    : path.join(__dirname, "..", "workspaces"));
 
 // ── Per-group lock ────────────────────────────────────────────────────────────
 // Render is a single box — serialize git ops per group via promise chain.

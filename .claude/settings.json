@@ -15,7 +15,13 @@
       "Bash(git rm *)",
       "Bash(npm run *)",
       "Bash(cd /home/vanshika/personalProjects/ko-lab-work/ko-lab/apps/web && ls pages 2>/dev/null; echo \"--- pages dir exists above? ---\"; ls -d ../../pages 2>/dev/null; echo \"--- 404/500/error pages in app ---\"; ls app/not-found* app/error* app/global-error* 2>/dev/null; echo \"--- tailwind content globs reference pages ---\"; grep -n \"pages\" tailwind.config.js)",
-      "Read(//home/vanshika/personalProjects/**)"
+      "Read(//home/vanshika/personalProjects/**)",
+      "Bash(grep -n '$disconnect\\\\|new PrismaClient\\\\|finally' app/api/create-group-data/route.ts)",
+      "Bash(curl -s localhost:8080/health)",
+      "Bash(grep -n \"RunLocallyMenu\\\\|liveUrl\\\\|LiveUrl\\\\|urlInput\\\\|editingUrl\\\\|SettingsPanel\\\\|useIdeSettings\\\\|Globe\\\\|ExternalLink\\\\|Settings,\\\\|  Check,\\\\|<Check\\\\|<X \\\\|X,\\\\|repoPaths\\\\|Use Run locally\\\\|contentCache.current.set\\(\\\\`\\\\${currentBranch}:\\\\${filePath}\\\\`\" Editor.tsx)",
+      "Bash(ps -eo pid,lstart,args)",
+      "Bash(curl -sI \"http://localhost:3000/_next/static/chunks/app_f9438b._.js\")",
+      "Bash(grep -rhoE 'https://[^\"`'\"'\"' ]+' index.js)"
     ]
   }
 }

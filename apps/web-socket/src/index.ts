@@ -4,6 +4,7 @@ import http from "http";
 import Express from "express";
 import { timingSafeEqual } from "crypto";
 import { verifyWsToken } from "./wsToken";
+import { verifyRingTicket } from "./ringTicket";
 import { git } from "./gitRouter";
 
 const app = Express();
@@ -17,7 +18,8 @@ const ALLOWED_ORIGINS = process.env.WS_ALLOWED_ORIGINS
 // ── Per-connection message rate limiting ────────────────────────────────────
 const MAX_MESSAGES_PER_SECOND = 10;
 const MAX_MESSAGE_SIZE_BYTES = 8_000; // 8KB per message
-const MAX_CONNECTIONS_PER_IP = 5;
+// Each tab opens 2–3 sockets, and an office or campus shares one IP.
+const MAX_CONNECTIONS_PER_IP = 20;
 
 // Track connection counts per IP to limit simultaneous connections
 const ipConnectionCount = new Map<string, number>();
@@ -64,7 +66,61 @@ const wss = new WebSocketServer({
   },
 });
 
-const groupClients = new Map<string, Map<string, WebSocket>>();
+// A room maps each user to ALL of their sockets in it. Holding one socket per
+// user meant a second tab replaced the first, and closing any socket (e.g. the
+// call socket reconnecting) dropped the user from the room entirely.
+type Room = Map<string, Set<WebSocket>>;
+
+const groupClients = new Map<string, Room>();
+// Which group rooms each socket joined, so closing it removes only that socket.
+const wsGroups = new Map<WebSocket, Set<string>>();
+
+function joinRoom(rooms: Map<string, Room>, key: string, userId: string, ws: WebSocket) {
+  let room = rooms.get(key);
+  if (!room) rooms.set(key, (room = new Map()));
+  let sockets = room.get(userId);
+  if (!sockets) room.set(userId, (sockets = new Set()));
+  sockets.add(ws);
+}
+
+function leaveRoom(rooms: Map<string, Room>, key: string, userId: string, ws: WebSocket) {
+  const room = rooms.get(key);
+  const sockets = room?.get(userId);
+  if (!room || !sockets) return;
+  sockets.delete(ws);
+  if (sockets.size === 0) room.delete(userId);
+  if (room.size === 0) rooms.delete(key);
+}
+
+/** Send to every socket in the room, skipping all of `exceptUserId`'s sockets. */
+function broadcastToRoom(
+  rooms: Map<string, Room>,
+  key: string,
+  payload: string,
+  exceptUserId?: string,
+) {
+  const room = rooms.get(key);
+  if (!room) return;
+  for (const [memberId, sockets] of room) {
+    if (memberId === exceptUserId) continue;
+    for (const s of sockets) {
+      if (s.readyState === WebSocket.OPEN) s.send(payload);
+    }
+  }
+}
+
+function joinGroupRoom(groupId: string, userId: string, ws: WebSocket) {
+  joinRoom(groupClients, groupId, userId, ws);
+  let joined = wsGroups.get(ws);
+  if (!joined) wsGroups.set(ws, (joined = new Set()));
+  joined.add(groupId);
+}
+
+function leaveGroupRoom(groupId: string, userId: string, ws: WebSocket) {
+  leaveRoom(groupClients, groupId, userId, ws);
+  wsGroups.get(ws)?.delete(groupId);
+}
+
 // A user can have several live sockets at once (call provider, group chat,
 // editor, DM…). Track ALL of them so individually-targeted messages such as
 // call_offer reach every tab/component, not just whichever connected last.
@@ -94,7 +150,7 @@ const WORKSPACE_BOARD_TYPES = new Set([
   "DB_SCHEMA",
   "UI_DESIGN",
 ]);
-const workspaceClients = new Map<string, Map<string, WebSocket>>();
+const workspaceClients = new Map<string, Room>();
 const wsWorkspaceRoom = new Map<WebSocket, string>();
 
 function workspaceRoomKey(groupId: string, board: string) {
@@ -108,66 +164,54 @@ function broadcastWorkspacePresence(roomKey: string) {
     type: "workspace_presence",
     userIds: Array.from(members.keys()),
   });
-  for (const memberWs of members.values()) {
-    if (memberWs.readyState === WebSocket.OPEN) memberWs.send(outbound);
-  }
+  broadcastToRoom(workspaceClients, roomKey, outbound);
 }
 
 // ── Call signaling helper ────────────────────────────────────────────────────
-function handleCallSignal(ws: WebSocket, msg: any, senderId: string) {
+function handleCallSignal(
+  ws: WebSocket,
+  msg: any,
+  senderId: string,
+  allowedGroups: Set<string>,
+) {
   switch (msg.type) {
     case "call_offer": {
-      if (msg.groupId) {
-        const outbound = JSON.stringify({
-          type: "call_offer",
+      // Who gets rung comes only from the ticket the app signed when it
+      // created the call (group roster, or a friend for 1:1) — never from the
+      // client, which used to be able to ring any user id it liked.
+      const ticket = verifyRingTicket(msg.ticket);
+      if (!ticket || ticket.callerId !== senderId || ticket.callId !== msg.callId) {
+        ws.send(JSON.stringify({
+          type: "error",
+          message: "Invalid or expired call ticket",
           callId: msg.callId,
-          roomName: msg.roomName,
-          callerId: senderId,
-          callerName: msg.callerName,
-          callType: msg.callType,
-          groupId: msg.groupId,
-        });
+        }));
+        break;
+      }
 
-        // Ring the group's actual roster, which the caller resolved server-side
-        // and sent as inviteeIds. groupClients only holds sockets that joined
-        // the group chat room, so relying on it meant a group call silently
-        // rang nobody unless every member happened to be on that page.
-        const invitees: string[] = Array.isArray(msg.inviteeIds) ? msg.inviteeIds : [];
-        const rung = new Set<string>();
-        for (const uid of invitees) {
-          if (typeof uid !== "string" || uid === senderId) continue;
-          if (sendToUser(uid, outbound)) rung.add(uid);
-        }
+      const outbound = JSON.stringify({
+        type: "call_offer",
+        callId: ticket.callId,
+        roomName: ticket.roomName,
+        callerId: senderId,
+        callerName: typeof msg.callerName === "string" ? msg.callerName.slice(0, 100) : "Unknown",
+        callType: msg.callType,
+        ...(ticket.groupId
+          ? { groupId: ticket.groupId }
+          : { targetId: ticket.invitees[0] }),
+      });
 
-        // Anyone sitting in the group room who wasn't on the roster (or whose
-        // id didn't arrive) still gets rung, so this can't regress the old path.
-        const members = groupClients.get(msg.groupId);
-        if (members) {
-          for (const [mid, mws] of members) {
-            if (mid === senderId || rung.has(mid)) continue;
-            if (mws.readyState === WebSocket.OPEN) mws.send(outbound);
-          }
-        }
-      } else if (msg.targetId) {
-        // Route to every socket the recipient has open
-        const delivered = sendToUser(msg.targetId, {
-          type: "call_offer",
-          callId: msg.callId,
-          roomName: msg.roomName,
-          callerId: senderId,
-          callerName: msg.callerName,
-          callType: msg.callType,
-          targetId: msg.targetId,
-        });
-        if (delivered) {
-          ws.send(JSON.stringify({ type: "call_offered", callId: msg.callId }));
-        } else {
-          ws.send(JSON.stringify({
-            type: "error",
-            message: "Recipient not connected",
-            callId: msg.callId,
-          }));
-        }
+      let delivered = false;
+      for (const uid of ticket.invitees) {
+        if (uid !== senderId && sendToUser(uid, outbound)) delivered = true;
+      }
+
+      if (!ticket.groupId) {
+        ws.send(JSON.stringify(
+          delivered
+            ? { type: "call_offered", callId: ticket.callId }
+            : { type: "error", message: "Recipient not connected", callId: ticket.callId },
+        ));
       }
       break;
     }
@@ -193,21 +237,15 @@ function handleCallSignal(ws: WebSocket, msg: any, senderId: string) {
     }
 
     case "call_ended": {
-      // Broadcast to all participants if groupId provided
-      if (msg.groupId) {
-        const members = groupClients.get(msg.groupId);
-        if (members) {
-          const outbound = JSON.stringify({
-            type: "call_ended",
-            callId: msg.callId,
-            endedBy: senderId,
-          });
-          for (const [mid, mws] of members) {
-            if (mid !== senderId && mws.readyState === WebSocket.OPEN) {
-              mws.send(outbound);
-            }
-          }
-        }
+      // Broadcast to all participants if groupId provided — members only, so
+      // outsiders can't hang up a group's call
+      if (msg.groupId && allowedGroups.has(msg.groupId)) {
+        broadcastToRoom(
+          groupClients,
+          msg.groupId,
+          JSON.stringify({ type: "call_ended", callId: msg.callId, endedBy: senderId }),
+          senderId,
+        );
       }
       // Also notify individual participant if targetId provided
       if (msg.targetId) {
@@ -258,6 +296,15 @@ wss.on("connection", (ws, req) => {
     req.socket.remoteAddress ||
     "unknown";
 
+  // verifyClient counted this connection. Release it on close whatever the
+  // reason — attached before the auth checks below, whose early closes used
+  // to leak the count until that IP was locked out.
+  ws.once("close", () => {
+    const count = ipConnectionCount.get(clientIP) || 1;
+    if (count <= 1) ipConnectionCount.delete(clientIP);
+    else ipConnectionCount.set(clientIP, count - 1);
+  });
+
   const urlParams = new URLSearchParams(req.url?.split("?")[1] || "");
   const groupId = urlParams.get("groupId");
   const board = urlParams.get("board");
@@ -287,17 +334,10 @@ wss.on("connection", (ws, req) => {
     return;
   }
 
-  // Track liveness for heartbeat
-  wsIsAlive.set(ws, true);
-  ws.on("pong", () => wsIsAlive.set(ws, true));
-
-  // Register this socket among the user's live connections (not overwrite)
-  if (!individualClients.has(userId)) individualClients.set(userId, new Set());
-  individualClients.get(userId)!.add(ws);
-
   // Membership is authorized from the signed claim — a well-formed groupId is
   // not enough. Without this, any authenticated user could join any group's
-  // room and receive its live traffic.
+  // room and receive its live traffic. Checked before the socket is registered
+  // anywhere, since the cleanup handler isn't attached yet.
   const mayJoinGroup =
     !!groupId && /^[a-zA-Z0-9_-]{1,64}$/.test(groupId) && allowedGroups.has(groupId);
 
@@ -306,19 +346,21 @@ wss.on("connection", (ws, req) => {
     return;
   }
 
+  // Track liveness for heartbeat
+  wsIsAlive.set(ws, true);
+  ws.on("pong", () => wsIsAlive.set(ws, true));
+
+  // Register this socket among the user's live connections (not overwrite)
+  if (!individualClients.has(userId)) individualClients.set(userId, new Set());
+  individualClients.get(userId)!.add(ws);
+
   if (mayJoinGroup) {
-    if (!groupClients.has(groupId!)) {
-      groupClients.set(groupId!, new Map());
-    }
-    groupClients.get(groupId!)!.set(userId, ws);
+    joinGroupRoom(groupId!, userId, ws);
   }
 
   if (mayJoinGroup && board && WORKSPACE_BOARD_TYPES.has(board)) {
     const roomKey = workspaceRoomKey(groupId!, board);
-    if (!workspaceClients.has(roomKey)) {
-      workspaceClients.set(roomKey, new Map());
-    }
-    workspaceClients.get(roomKey)!.set(userId, ws);
+    joinRoom(workspaceClients, roomKey, userId, ws);
     wsWorkspaceRoom.set(ws, roomKey);
     broadcastWorkspacePresence(roomKey);
   }
@@ -386,21 +428,14 @@ wss.on("connection", (ws, req) => {
           ws.send(JSON.stringify({ type: "error", message: "Not a member of this group" }));
           return;
         }
-        if (!groupClients.has(gId)) {
-          groupClients.set(gId, new Map());
-        }
-        groupClients.get(gId)!.set(userId, ws);
+        joinGroupRoom(gId, userId, ws);
         ws.send(JSON.stringify({ type: "joined_group", groupId: gId }));
         return;
       }
 
       if (parsedMessage.type === "leave_group" && parsedMessage.groupId) {
-        const gId = parsedMessage.groupId;
-        const members = groupClients.get(gId);
-        if (members) {
-          members.delete(userId);
-          if (members.size === 0) groupClients.delete(gId);
-        }
+        // Only this socket leaves; the user's other tabs stay in the room
+        leaveGroupRoom(parsedMessage.groupId, userId, ws);
         return;
       }
 
@@ -416,18 +451,16 @@ wss.on("connection", (ws, req) => {
             op: parsedMessage.op,
             userId,
           });
-          for (const [memberId, memberWs] of members) {
-            if (memberId !== userId && memberWs.readyState === WebSocket.OPEN) {
-              memberWs.send(outbound);
-            }
-          }
+          broadcastToRoom(workspaceClients, roomKey, outbound, userId);
         }
         return;
       }
 
       // ── Call signaling ─────────────────────────────────────────────────
-      if (parsedMessage.type.startsWith("call_")) {
-        handleCallSignal(ws, parsedMessage, userId);
+      // Chat messages carry no `type`; calling startsWith on undefined threw
+      // and every chat message was answered with "Invalid JSON".
+      if (typeof parsedMessage.type === "string" && parsedMessage.type.startsWith("call_")) {
+        handleCallSignal(ws, parsedMessage, userId, allowedGroups);
         return;
       }
 
@@ -471,24 +504,24 @@ wss.on("connection", (ws, req) => {
         return;
       }
 
-      // Group messaging — broadcast to all members of the group
+      // Group messaging — broadcast to all members of the group. Membership
+      // is checked here as well as at join, or any signed-in user could post
+      // into any group's live chat.
       if (parsedMessage.groupId) {
-        const members = groupClients.get(parsedMessage.groupId);
-        if (members) {
-          const outbound = JSON.stringify({
-            id: parsedMessage.id,
-            senderId: userId,
-            senderName: parsedMessage.senderName,
-            groupId: parsedMessage.groupId,
-            content: parsedMessage.content,
-            createdAt: Date.now(),
-          });
-          for (const [memberId, memberWs] of members.entries()) {
-            if (memberId !== userId && memberWs.readyState === WebSocket.OPEN) {
-              memberWs.send(outbound);
-            }
-          }
+        if (!allowedGroups.has(parsedMessage.groupId)) {
+          ws.send(JSON.stringify({ type: "error", message: "Not a member of this group" }));
+          return;
         }
+        const outbound = JSON.stringify({
+          id: parsedMessage.id,
+          senderId: userId,
+          senderName: parsedMessage.senderName,
+          groupId: parsedMessage.groupId,
+          content: parsedMessage.content,
+          createdAt: Date.now(),
+        });
+        // Skips every socket of the sender (their own tab shows it optimistically)
+        broadcastToRoom(groupClients, parsedMessage.groupId, outbound, userId);
       }
     } catch {
       ws.send(JSON.stringify({ type: "error", message: "Invalid JSON" }));
@@ -497,15 +530,6 @@ wss.on("connection", (ws, req) => {
 
   ws.on("close", () => {
     wsIsAlive.delete(ws);
-
-    // Decrement IP connection count
-    const count = ipConnectionCount.get(clientIP) || 1;
-    if (count <= 1) {
-      ipConnectionCount.delete(clientIP);
-    } else {
-      ipConnectionCount.set(clientIP, count - 1);
-    }
-
     clearInterval(rateLimitWindow);
 
     // Remove just this socket from the user's set (they may have others open)
@@ -514,25 +538,18 @@ wss.on("connection", (ws, req) => {
       userSockets.delete(ws);
       if (userSockets.size === 0) individualClients.delete(userId);
     }
-    for (const [gId, clients] of groupClients.entries()) {
-      if (clients.has(userId)) {
-        clients.delete(userId);
-        if (clients.size === 0) groupClients.delete(gId);
-      }
+    // Leave only the rooms THIS socket joined; the user's other sockets stay
+    for (const gId of wsGroups.get(ws) ?? []) {
+      leaveRoom(groupClients, gId, userId, ws);
     }
+    wsGroups.delete(ws);
 
     const roomKey = wsWorkspaceRoom.get(ws);
     if (roomKey) {
       wsWorkspaceRoom.delete(ws);
-      const members = workspaceClients.get(roomKey);
-      if (members) {
-        members.delete(userId);
-        if (members.size === 0) {
-          workspaceClients.delete(roomKey);
-        } else {
-          broadcastWorkspacePresence(roomKey);
-        }
-      }
+      leaveRoom(workspaceClients, roomKey, userId, ws);
+      // Presence only changes if that was the user's last socket in the room
+      broadcastWorkspacePresence(roomKey);
     }
   });
 

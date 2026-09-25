@@ -1,1 +1,1 @@
-{"root":["./src/gitRouter.ts","./src/gitWorkspace.ts","./src/index.ts","./src/prismaClient.ts","./src/redisClient.ts","./src/wsToken.ts"],"version":"5.9.3"}
+{"root":["./src/gitRouter.ts","./src/gitWorkspace.ts","./src/index.ts","./src/prismaClient.ts","./src/redisClient.ts","./src/ringTicket.ts","./src/wsToken.ts"],"version":"5.9.3"}
