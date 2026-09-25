@@ -25,14 +25,14 @@ export async function GET() {
       status: "accepted",
     },
     include: {
-      sender: { select: { id: true, name: true, phone: true } },
-      receiver: { select: { id: true, name: true, phone: true } },
+      sender: { select: { id: true, name: true, phone: true, image: true } },
+      receiver: { select: { id: true, name: true, phone: true, image: true } },
     },
   });
 
   const friends = friendships.map((f) => {
     const friend = f.senderId === user.id ? f.receiver : f.sender;
-    return { id: friend.id, name: friend.name, phone: friend.phone };
+    return { id: friend.id, name: friend.name, phone: friend.phone, image: friend.image };
   });
 
   return NextResponse.json({ friends });

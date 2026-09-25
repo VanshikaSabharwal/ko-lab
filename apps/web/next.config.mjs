@@ -59,14 +59,21 @@ const securityHeaders = [
       "default-src 'self'",
       // unsafe-inline needed for Tailwind/Next.js inline styles
       // unsafe-eval needed for Next.js dev HMR (remove in production if possible)
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      // cdn.jsdelivr.net: Pyodide (Python in the browser) for the code editor's Run button
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net",
       "style-src 'self' 'unsafe-inline'",
       // Allow images from self, data URIs, and any HTTPS source (GitHub avatars etc.).
       // LocalStack serves over plain HTTP in dev, so it needs an explicit allowance.
       `img-src 'self' data: https:${process.env.NODE_ENV !== "production" ? " http://localhost:4566" : ""}`,
       "font-src 'self'",
       // Allow connections to your own API + WebSocket server + GitHub API
-      `connect-src 'self' ${allowedOrigins.join(" ")} ws://localhost:8080 wss: ws://localhost:7880 https://api.github.com`,
+      // cdn.jsdelivr.net: Pyodide's WebAssembly, standard library and packages
+      `connect-src 'self' ${allowedOrigins.join(" ")} ws://localhost:8080 wss: ws://localhost:7880 https://api.github.com https://cdn.jsdelivr.net`,
+      // Code-runner workers are bundled scripts served from our own origin
+      "worker-src 'self'",
+      // The editor's terminal: WebContainers boot in a stackblitz.com iframe, and
+      // apps started in it are previewed from *.webcontainer-api.io
+      "frame-src 'self' https://stackblitz.com https://*.stackblitz.com https://*.staticblitz.com https://*.webcontainer-api.io",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
@@ -97,17 +104,30 @@ const assistantHeaders = [
   },
 ];
 
+// The code editor's terminal runs Node in the browser (WebContainers), which
+// needs SharedArrayBuffer, which needs cross-origin isolation. "credentialless"
+// rather than "require-corp", so cross-origin images (GitHub avatars) still load.
+const EDITOR_ROUTES = ["/code-editor/:path*"];
+
+const crossOriginIsolationHeaders = [
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
+];
+
 const nextConfig = {
   headers: async () => [
     {
-      // Apply security headers to all routes
-      source: "/(.*)",
+      // Apply security headers to all routes except "Make it live" sites,
+      // which set their own sandboxing CSP (two CSPs would both apply and block
+      // the site's CDN assets).
+      source: "/((?!preview/).*)",
       headers: securityHeaders,
     },
     // Re-grant camera/mic only on call-capable routes. Listed after the
     // catch-all so these values override the deny above.
     ...CALL_ROUTES.map((source) => ({ source, headers: callHeaders })),
     ...ASSISTANT_ROUTES.map((source) => ({ source, headers: assistantHeaders })),
+    ...EDITOR_ROUTES.map((source) => ({ source, headers: crossOriginIsolationHeaders })),
     {
       // CORS for your API routes — only allow your own origin
       source: "/api/(.*)",

@@ -4,6 +4,8 @@ import GoogleProvider from "next-auth/providers/google";
 import { PrismaAdapter } from "@next-auth/prisma-adapter";
 import prisma from "./prisma";
 
+const PICTURE_REFRESH_MS = 5 * 60 * 1000;
+
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
 
@@ -33,7 +35,7 @@ export const authOptions: NextAuthOptions = {
   },
 
   callbacks: {
-    async jwt({ token, user, account }) {
+    async jwt({ token, user, account, trigger }) {
       if (account && user) {
         token.id = user.id;
         token.accessToken = account.access_token!;
@@ -41,6 +43,25 @@ export const authOptions: NextAuthOptions = {
         if (account.provider === "github") {
           token.githubAccessToken = account.access_token!;
         }
+      }
+
+      // The photo is copied into the token at sign-in, so an avatar uploaded
+      // later never reached the header. Re-read it when the client calls
+      // update() after an upload, and every few minutes otherwise so tokens
+      // issued before this change heal on their own.
+      const now = Date.now();
+      if (
+        token.id &&
+        (trigger === "update" ||
+          !token.pictureCheckedAt ||
+          now - token.pictureCheckedAt > PICTURE_REFRESH_MS)
+      ) {
+        const dbUser = await prisma.user.findUnique({
+          where: { id: token.id },
+          select: { image: true },
+        });
+        token.picture = dbUser?.image ?? null;
+        token.pictureCheckedAt = now;
       }
       return token;
     },
@@ -50,6 +71,7 @@ export const authOptions: NextAuthOptions = {
       session.user.accessToken = token.accessToken as string;
       session.user.provider = token.provider as string;
       session.user.githubAccessToken = token.githubAccessToken as string;
+      session.user.image = token.picture ?? undefined;
       return session;
     },
   },

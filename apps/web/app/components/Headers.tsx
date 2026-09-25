@@ -3,9 +3,9 @@
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
-import { Sun, Moon, Github, User } from "lucide-react";
-import Image from "next/image";
+import { Sun, Moon, Github, Settings } from "lucide-react";
 import Link from "next/link";
+import UserAvatar from "./UserAvatar";
 import { usePathname } from "next/navigation";
 
 // Routes that render their own full-height chrome (sidebar + top bar) and would
@@ -61,22 +61,22 @@ const Header = () => {
               <div className="flex items-center gap-2">
                 <Link
                   href="/profile"
+                  className="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors duration-200"
+                  aria-label="Settings"
+                  title="Settings"
+                >
+                  <Settings className="w-4 h-4" />
+                </Link>
+                <Link
+                  href="/profile"
                   className="flex items-center justify-center w-8 h-8 rounded-full overflow-hidden border border-gray-200 dark:border-gray-700 hover:ring-2 hover:ring-blue-500 transition"
                   title="Profile"
                 >
-                  {session?.user?.image ? (
-                    <Image
-                      src={session.user.image}
-                      alt="Profile"
-                      width={32}
-                      height={32}
-                      className="object-cover w-full h-full"
-                    />
-                  ) : (
-                    <div className="w-full h-full bg-gray-100 dark:bg-gray-800 flex items-center justify-center">
-                      <User className="w-4 h-4 text-gray-500" />
-                    </div>
-                  )}
+                  <UserAvatar
+                    src={session?.user?.image}
+                    name={session?.user?.name ?? session?.user?.email}
+                    size={32}
+                  />
                 </Link>
                 <button
                   onClick={() => signOut()}

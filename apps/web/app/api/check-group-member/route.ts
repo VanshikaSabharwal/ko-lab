@@ -1,5 +1,5 @@
 import prisma from "../../lib/prisma";
-import { getSessionUser, unauthorized } from "../../lib/apiAuth";
+import { getSessionUser, isGroupMember, unauthorized } from "../../lib/apiAuth";
 
 export async function GET(req: Request) {
   const me = await getSessionUser();
@@ -17,10 +17,12 @@ export async function GET(req: Request) {
   }
 
   try {
-    // Check if the group exists and include its members
+    // Only the id matters here. Loading the whole row made this fail whenever
+    // a Group column was missing from the database (e.g. a migration not yet
+    // applied), and the chat read that failure as "not a member".
     const groupExists = await prisma.group.findUnique({
       where: { id: group },
-      include: { members: true },
+      select: { id: true },
     });
 
     // If the group doesn't exist, return an error
@@ -30,10 +32,8 @@ export async function GET(req: Request) {
       });
     }
 
-    // Check if the logged-in user is a member of the group
-    const isMember = groupExists.members.some(
-      (member) => member.userId === me.id,
-    );
+    // The owner has no GroupMember row, so a members-only check said "no" to them
+    const isMember = await isGroupMember(group, me.id);
 
     // Return true or false based on membership
     return new Response(JSON.stringify({ exists: isMember }), { status: 200 });

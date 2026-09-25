@@ -233,6 +233,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
           toast.success("Call accepted");
           break;
         case "call_rejected":
+          // Only the call it names — any user can send this message, so it
+          // must not be able to drop whatever call we're in
+          if (activeCallRef.current?.callId !== msg.callId) break;
           toast.error("Call rejected");
           activeCallRef.current?.room?.disconnect();
           callStartedAtRef.current = null;
@@ -339,7 +342,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ type, targetId, groupId }),
       });
 
-      if (!res.ok) throw new Error("Failed to initiate call");
+      if (!res.ok) {
+        // A refusal (not a friend, not in the group) has a reason worth showing
+        const body = await res.json().catch(() => ({}));
+        if (res.status === 403 && body.error) {
+          toast.error(body.error);
+          resetCallState();
+          return;
+        }
+        throw new Error("Failed to initiate call");
+      }
 
       const data = await res.json();
 
@@ -378,29 +390,16 @@ export function CallProvider({ children }: { children: ReactNode }) {
       });
       setCallStatus("connected");
 
-      // Notify via WebSocket
-      if (groupId) {
-        wsSend({
-          type: "call_offer",
-          callId: data.callRoom.id,
-          roomName: data.roomName,
-          groupId,
-          // Resolved server-side from the group's membership, so the ring
-          // reaches members wherever they are in the app.
-          inviteeIds: data.inviteeIds ?? [],
-          callerName: session.user.name || session.user.email || "Unknown",
-          callType: type,
-        });
-      } else if (targetId) {
-        wsSend({
-          type: "call_offer",
-          callId: data.callRoom.id,
-          roomName: data.roomName,
-          targetId,
-          callerName: session.user.name || session.user.email || "Unknown",
-          callType: type,
-        });
-      }
+      // Notify via WebSocket. Who gets rung (group roster, or the friend) is
+      // fixed by the server-signed ticket; the socket server ignores anything
+      // else the client says about invitees.
+      wsSend({
+        type: "call_offer",
+        callId: data.callRoom.id,
+        ticket: data.ringTicket,
+        callerName: session.user.name || session.user.email || "Unknown",
+        callType: type,
+      });
     } catch (error) {
       console.error("Initiate call error:", error);
       // Previously this failed in silence: the button un-pressed and nothing

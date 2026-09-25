@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { signIn, useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import { FaGithub } from "react-icons/fa";
 import { ChevronDown, Search, X } from "lucide-react";
@@ -19,6 +20,7 @@ type GithubRepo = {
 
 export default function GithubGroupCreateLogin() {
   const { data: session } = useSession();
+  const router = useRouter();
   const [repos, setRepos] = useState<GithubRepo[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<GithubRepo | null>(null);
   const [groupName, setGroupName] = useState("");
@@ -92,17 +94,16 @@ export default function GithubGroupCreateLogin() {
       const data = await response.json();
 
       if (response.ok) {
-        toast.success(`Group created successfully ✨`);
-        setGroupName("");
-        setSelectedRepo(null);
-      } else {
-        toast.error(`Error: ${data.error}`);
+        toast.success(`Group "${data.groupName}" created`);
+        // Straight into the new group; the button stays busy until the page changes
+        router.push(`/group/${data.id}`);
+        return;
       }
+      toast.error(`Error: ${data.error}`);
     } catch {
       toast.error("Failed to create group");
-    } finally {
-      setCreating(false);
     }
+    setCreating(false);
   };
 
   return (

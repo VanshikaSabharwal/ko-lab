@@ -160,19 +160,17 @@ const HeroSection = () => {
             </div>
           </motion.div>
 
-          {/* Right: Assistant Chat (only for authenticated users) */}
-          {session && (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.6, delay: 0.2 }}
-              className="h-full"
-            >
-              <div className="h-full lg:min-h-96">
-                <AssistantChat />
-              </div>
-            </motion.div>
-          )}
+          {/* Right: Assistant Chat (guests are asked to log in on send) */}
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.6, delay: 0.2 }}
+            className="h-full"
+          >
+            <div className="h-full lg:min-h-96">
+              <AssistantChat />
+            </div>
+          </motion.div>
         </div>
       </section>
 

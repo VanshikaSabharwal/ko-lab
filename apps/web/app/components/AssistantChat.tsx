@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useSession } from "next-auth/react";
+import { signIn, useSession } from "next-auth/react";
 import {
   ArrowRight,
   Loader2,
@@ -217,7 +217,7 @@ export function AssistantMessageList({
   className?: string;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const text = size === "lg" ? "text-sm" : "text-xs";
+  const text = size === "lg" ? "text-[15px]" : "text-sm";
 
   useEffect(() => {
     scrollRef.current?.scrollTo({
@@ -239,7 +239,7 @@ export function AssistantMessageList({
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`px-3 py-2 rounded-lg ${text} ${
+              className={`px-3.5 py-2.5 rounded-xl ${text} ${
                 msg.role === "user"
                   ? "max-w-[75%] bg-blue-600 text-white rounded-br-none whitespace-pre-wrap"
                   : "max-w-[85%] bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-bl-none"
@@ -256,8 +256,8 @@ export function AssistantMessageList({
       )}
       {chat.loading && (
         <div className="flex justify-start">
-          <div className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 flex items-center gap-1.5">
-            <Loader2 className="w-3 h-3 animate-spin text-gray-600 dark:text-gray-400" />
+          <div className="px-3.5 py-2.5 rounded-xl bg-gray-100 dark:bg-gray-700 flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin text-gray-600 dark:text-gray-400" />
             <span className={`${text} text-gray-600 dark:text-gray-400`}>
               Thinking...
             </span>
@@ -283,8 +283,8 @@ export function AssistantComposer({
   const [input, setInput] = useState("");
   const { isListening, toggle } = useSpeechInput(setInput);
   // 16px on the full page stops iOS Safari zooming into the input on focus
-  const text = size === "lg" ? "text-base" : "text-xs";
-  const icon = size === "lg" ? "w-4 h-4" : "w-3 h-3";
+  const text = size === "lg" ? "text-base" : "text-sm";
+  const icon = "w-4 h-4";
 
   if (chat.outOfCredits) {
     return (
@@ -324,13 +324,13 @@ export function AssistantComposer({
             isListening ? "Listening..." : "Ask me anything or use voice..."
           }
           disabled={chat.loading}
-          className={`flex-1 min-w-0 px-3 py-2 ${text} rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 transition`}
+          className={`flex-1 min-w-0 px-3.5 py-2.5 ${text} rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 transition`}
         />
         <button
           type="button"
           onClick={toggle}
           disabled={chat.loading}
-          className={`px-3 py-2 rounded-lg transition flex items-center justify-center ${
+          className={`px-3.5 py-2.5 rounded-lg transition flex items-center justify-center ${
             isListening
               ? "bg-red-500 hover:bg-red-600 text-white"
               : "bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300"
@@ -342,7 +342,7 @@ export function AssistantComposer({
         <button
           type="submit"
           disabled={chat.loading || !input.trim()}
-          className="px-3 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:opacity-90 disabled:opacity-50 transition flex items-center justify-center"
+          className="px-3.5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:opacity-90 disabled:opacity-50 transition flex items-center justify-center"
         >
           <Send className={icon} />
         </button>
@@ -353,7 +353,7 @@ export function AssistantComposer({
 
 /**
  * Home-page assistant card.
- * Shows only for authenticated users; guests see the static AssistantShowcase.
+ * Shown to everyone; guests are asked to log in when they try to send.
  * On phones it has no scrolling area of its own (so swipes over it scroll the
  * page) and sending a message opens the full-screen chat at /assistant.
  */
@@ -362,12 +362,30 @@ export default function AssistantChat() {
   const router = useRouter();
   const chat = useAssistantChat();
 
-  // Only render for authenticated users (after all hooks, so hook order is stable)
-  if (!session?.user) {
-    return null;
-  }
-
   const submit = (text: string) => {
+    if (!session?.user) {
+      if (text.trim()) {
+        toast.error(
+          (t) => (
+            <span className="flex items-center gap-3">
+              You need to log in to chat with the assistant.
+              <button
+                type="button"
+                onClick={() => {
+                  toast.dismiss(t.id);
+                  signIn();
+                }}
+                className="shrink-0 rounded-md bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700"
+              >
+                Log in
+              </button>
+            </span>
+          ),
+          { id: "assistant-login" },
+        );
+      }
+      return false;
+    }
     if (!chat.send(text)) return false;
     if (window.matchMedia(PHONE_QUERY).matches) router.push("/assistant");
     return true;
@@ -376,15 +394,15 @@ export default function AssistantChat() {
   return (
     // Fixed height on desktop: the parents are auto-height, so without a cap
     // the card grows with every message and the list below never scrolls.
-    <div className="flex flex-col md:h-[560px] md:max-h-[80vh] bg-white dark:bg-gray-800/40 backdrop-blur border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl overflow-hidden">
+    <div className="flex flex-col md:h-[640px] md:max-h-[85vh] bg-white dark:bg-gray-800/40 backdrop-blur border border-gray-200 dark:border-gray-700 rounded-2xl shadow-xl overflow-hidden">
       {/* Header */}
       <div className="p-6 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-gray-900/50 dark:to-gray-800/50">
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5 text-blue-500" />
-          <h3 className="text-base font-semibold">Ko-Lab Assistant</h3>
+          <h3 className="text-lg font-semibold">Ko-Lab Assistant</h3>
           <ChatActions chat={chat} />
         </div>
-        <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
+        <p className="text-[15px] text-gray-600 dark:text-gray-400 mt-2">
           Ask about your groups, tasks, or recent changes
         </p>
       </div>

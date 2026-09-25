@@ -255,8 +255,15 @@ async function executeToolCall(
         const taskId = toolInput.task_id;
         if (!taskId) throw new Error("task_id is required");
 
-        const task = await prisma.planningTask.findUnique({
-          where: { id: taskId },
+        // Scoped to the user's groups, like list_my_tasks — a task id alone
+        // must not expose another group's planning
+        const task = await prisma.planningTask.findFirst({
+          where: {
+            id: taskId,
+            group: {
+              OR: [{ ownerId: userId }, { members: { some: { userId } } }],
+            },
+          },
           select: {
             id: true,
             title: true,

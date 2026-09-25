@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { NodeResizer, type NodeProps } from "@xyflow/react";
 
 export type UiKind =
@@ -128,6 +128,105 @@ function DecorativeContent({ kind, label }: { kind: UiKind; label: string }) {
   }
 }
 
+/**
+ * What an element shows before anyone has named it. Buttons and badges read as
+ * real text; controls like a toggle show nothing, since the switch is the point
+ * (the raw kind used to appear as placeholder text, e.g. "toggle").
+ */
+const DEFAULT_TEXT: Partial<Record<UiKind, { text: string; muted: boolean }>> = {
+  button: { text: "Button", muted: false },
+  badge: { text: "Badge", muted: false },
+  text: { text: "Text", muted: false },
+  input: { text: "Input", muted: true },
+  dropdown: { text: "Select…", muted: true },
+  frame: { text: "Frame", muted: true },
+  container: { text: "Container", muted: true },
+  card: { text: "Card", muted: true },
+  // Tabs are a comma-separated list; each item becomes one tab
+  tabs: { text: "Tab 1, Tab 2, Tab 3", muted: false },
+};
+
+function TabStrip({ text }: { text: string }) {
+  const tabs = text.split(",").map((t) => t.trim()).filter(Boolean);
+  return (
+    <>
+      {tabs.map((tab, i) => (
+        <span
+          key={i}
+          className={
+            i === 0
+              ? "rounded-t border border-b-0 border-gray-500 bg-gray-800 px-3 py-1 text-[11px] text-white"
+              : "px-3 py-1 text-[11px] text-gray-500"
+          }
+        >
+          {tab}
+        </span>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Shows the label as plain text so a press anywhere on the element drags it;
+ * double-click switches to an input. An always-on input covered the whole
+ * element and, being `nodrag`, made buttons, badges and text impossible to move.
+ */
+function EditableLabel({
+  kind,
+  value,
+  onChange,
+  className,
+  display,
+}: {
+  kind: UiKind;
+  value: string;
+  onChange: (label: string) => void;
+  className: string;
+  /** Custom rendering of the (non-editing) text, e.g. tabs from a list. */
+  display?: (text: string) => React.ReactNode;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const fallback = DEFAULT_TEXT[kind];
+
+  const finish = (commit: boolean) => {
+    if (commit && draft !== value) onChange(draft);
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => finish(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") finish(true);
+          if (e.key === "Escape") finish(false);
+        }}
+        placeholder={fallback?.text}
+        className={`nodrag bg-transparent outline-none ring-1 ring-blue-400/60 ${className}`}
+      />
+    );
+  }
+
+  const shown = value || fallback?.text || "";
+  return (
+    <span
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        setDraft(value);
+        setEditing(true);
+      }}
+      title="Double-click to edit text"
+      className={`truncate ${!value && fallback?.muted ? "opacity-50" : ""} ${className}`}
+    >
+      {display ? display(shown) : shown}
+    </span>
+  );
+}
+
 export default function UiPrimitiveNode({ data, selected }: NodeProps) {
   const d = data as unknown as UiPrimitiveData;
   const isCornerLabel = CORNER_LABELED.includes(d.kind);
@@ -144,13 +243,6 @@ export default function UiPrimitiveNode({ data, selected }: NodeProps) {
     <div className={`relative h-full w-full ${KIND_CLASSES[d.kind]}`} style={style}>
       <NodeResizer isVisible={selected} minWidth={24} minHeight={8} />
 
-      {d.kind === "tabs" && (
-        <>
-          <span className="rounded-t border border-b-0 border-gray-500 bg-gray-800 px-3 py-1 text-[11px] text-white">Tab 1</span>
-          <span className="px-3 py-1 text-[11px] text-gray-500">Tab 2</span>
-          <span className="px-3 py-1 text-[11px] text-gray-500">Tab 3</span>
-        </>
-      )}
       {d.kind === "checkbox" && <span className="h-3.5 w-3.5 shrink-0 rounded-sm border border-gray-500" />}
       {d.kind === "toggle" && (
         <span className="relative h-4 w-7 shrink-0 rounded-full bg-blue-600">
@@ -161,18 +253,28 @@ export default function UiPrimitiveNode({ data, selected }: NodeProps) {
 
       {isDecorative ? (
         <DecorativeContent kind={d.kind} label={d.label} />
-      ) : d.kind === "tabs" ? null : (
-        <input
+      ) : d.kind === "tabs" ? (
+        <EditableLabel
+          kind="tabs"
           value={d.label}
-          onChange={(e) => d.onChange(e.target.value)}
-          placeholder={d.kind}
-          className={`nodrag bg-transparent outline-none ${
+          onChange={d.onChange}
+          className="flex h-full w-full items-end gap-1"
+          display={(text) => <TabStrip text={text} />}
+        />
+      ) : (
+        <EditableLabel
+          kind={d.kind}
+          value={d.label}
+          onChange={d.onChange}
+          className={
             isCornerLabel
               ? "absolute left-2 top-1 w-2/3 text-[11px] text-gray-400"
               : d.kind === "dropdown" || d.kind === "checkbox" || d.kind === "toggle" || d.kind === "navbar"
                 ? "min-w-0 flex-1 px-1"
-                : "h-full w-full px-2 text-center"
-          }`}
+                : d.kind === "text"
+                  ? "block w-full px-2"
+                  : "block w-full px-2 text-center"
+          }
         />
       )}
       {d.kind === "dropdown" && <span className="shrink-0 text-gray-500">▾</span>}

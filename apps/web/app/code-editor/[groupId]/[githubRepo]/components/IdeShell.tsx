@@ -4,11 +4,11 @@ import React from "react";
 import Link from "next/link";
 import { signOut } from "next-auth/react";
 import {
-  Folder, Users, Settings, Menu, Search, LogOut, Plus, X, Sparkles, Trash2,
+  Folder, Users, Settings, Menu, Search, LogOut, Plus, X, Sparkles, Trash2, SquareTerminal,
 } from "lucide-react";
 import { cn } from "../../../../lib/utils";
 
-export type IdeSection = "files" | "collaboration" | "trash" | "settings";
+export type IdeSection = "files" | "terminal" | "collaboration" | "trash" | "settings";
 
 interface IdeShellProps {
   repo: string;
@@ -29,6 +29,7 @@ interface IdeShellProps {
 
 const NAV: { key: IdeSection; label: string; short: string; icon: typeof Folder }[] = [
   { key: "files", label: "Files", short: "Files", icon: Folder },
+  { key: "terminal", label: "Terminal", short: "Terminal", icon: SquareTerminal },
   { key: "collaboration", label: "Collaboration", short: "Collab", icon: Users },
   { key: "trash", label: "Trash", short: "Trash", icon: Trash2 },
   { key: "settings", label: "Settings", short: "Settings", icon: Settings },
@@ -117,7 +118,7 @@ export default function IdeShell({
 
           <div className="px-3 pb-3">
             <Link
-              href="/create-group"
+              href="/github"
               className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2.5 text-sm font-medium text-white transition hover:bg-blue-500"
             >
               <Plus size={15} /> New Project

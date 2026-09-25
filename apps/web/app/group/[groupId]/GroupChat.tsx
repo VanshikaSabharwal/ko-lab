@@ -1,12 +1,15 @@
 "use client";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { TbSend } from "react-icons/tb";
+import { MdSend } from "react-icons/md";
 import { FaUserPlus, FaUsers, FaCrown, FaGithub, FaEdit } from "react-icons/fa";
 import toast from "react-hot-toast";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { LayoutGrid, Video, Phone } from "lucide-react";
+import { LayoutGrid, Video, Phone, Image as ImageIcon } from "lucide-react";
+import GroupAvatar from "../../components/GroupAvatar";
+import UserAvatar from "../../components/UserAvatar";
+import GroupPhotoDialog from "../../components/GroupPhotoDialog";
 import { useCall } from "../../components/call/CallProvider";
 import { useTheme } from "next-themes";
 import { fetchWsToken } from "../../lib/wsAuth";
@@ -48,6 +51,7 @@ interface GroupDetails {
   githubRepo: string;
   groupName: string;
   liveUrl?: string;
+  image?: string | null;
 }
 
 function sendBrowserNotification(title: string, body: string) {
@@ -70,6 +74,7 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
   const [newMessage, setNewMessage] = useState("");
   const wsRef = useRef<WebSocket | null>(null);
   const [groupDetails, setGroupDetails] = useState<GroupDetails | null>(null);
+  const [memberImages, setMemberImages] = useState<Record<string, string | null>>({});
   const [isMember, setIsMember] = useState(false);
   const [loadingGroupDetails, setLoadingGroupDetails] = useState(true);
   const [loadingPercentage, setLoadingPercentage] = useState(0);
@@ -86,6 +91,7 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
   const [showRenameModal, setShowRenameModal] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [showPhotoDialog, setShowPhotoDialog] = useState(false);
 
   // Background
   const [chatBg, setChatBg] = useState(() =>
@@ -200,7 +206,9 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
         );
       if (!recent) return;
       localStorage.setItem(key, "1");
-      toast(systemMessageText(recent.content), { icon: "👋" });
+      toast(
+        systemMessageText(recent.content, { viewerId: session?.user?.id, senderId: recent.senderId }),
+      );
     } catch {
       // Private browsing can throw on localStorage; a missing greeting is fine.
     }
@@ -226,8 +234,22 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
         }
       };
 
+      // Photos by user id, for the avatar beside each member's messages. Live
+      // socket messages carry only the sender id, so this lookup covers both.
+      const fetchMemberImages = async () => {
+        try {
+          const res = await fetch(`/api/groups/${group}/members`);
+          if (!res.ok) return;
+          const data: { members: { id: string; image: string | null }[] } = await res.json();
+          setMemberImages(Object.fromEntries(data.members.map((m) => [m.id, m.image])));
+        } catch {
+          // Avatars fall back to initials
+        }
+      };
+
       fetchMessages();
       fetchGroupDetails();
+      fetchMemberImages();
 
       let interval = setInterval(() => {
         setLoadingPercentage((prev) => {
@@ -285,6 +307,9 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
           // rendered empty bubbles stamped "Invalid Date" — they carry no
           // content or createdAt. CallProvider handles them separately.
           if (message.type || !message.content) return;
+          // Direct messages are delivered to every socket a user has, this one
+          // included; only this group's messages belong in its transcript.
+          if (message.groupId !== group) return;
           setMessages((prev) => [
             ...prev,
             {
@@ -300,7 +325,12 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
             // A system announcement isn't from a person, so it would read as
             // "Vanshika: __system__:… " in an OS notification.
             if (isSystemMessage(message.content)) {
-              toast(systemMessageText(message.content), { icon: "👋" });
+              toast(
+                systemMessageText(message.content, {
+                  viewerId: session?.user?.id,
+                  senderId: message.senderId,
+                }),
+              );
             } else {
               sendBrowserNotification(
                 `${message.senderName ?? "Someone"} in ${groupDetails?.groupName ?? "a group"}`,
@@ -474,10 +504,18 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
       {/* Header */}
       <div className="px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between relative">
         <div className="flex items-center gap-3 min-w-0">
-          {/* Group avatar */}
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
-            {groupDetails?.groupName?.[0]?.toUpperCase() ?? "G"}
-          </div>
+          {/* Group avatar — the owner can tap it to change the photo */}
+          {isOwner ? (
+            <button
+              onClick={() => setShowPhotoDialog(true)}
+              title="Change group photo"
+              className="rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <GroupAvatar name={groupDetails?.groupName} image={groupDetails?.image} size={36} />
+            </button>
+          ) : (
+            <GroupAvatar name={groupDetails?.groupName} image={groupDetails?.image} size={36} />
+          )}
           <div className="min-w-0 overflow-hidden">
             <div className="flex items-center gap-1.5">
               <p className="text-sm font-semibold text-gray-900 dark:text-white truncate min-w-0">
@@ -557,6 +595,20 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
                 </svg>
                 Code Editor
               </Link>
+
+              {/* Group Photo — owner only */}
+              {isOwner && (
+                <button
+                  onClick={() => {
+                    setShowPhotoDialog(true);
+                    setMenuOpen(false);
+                  }}
+                  className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                >
+                  <ImageIcon className="w-4 h-4" />
+                  Group Photo
+                </button>
+              )}
 
               {/* Workspace */}
               <Link
@@ -708,14 +760,24 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
               return (
                 <div key={index} className="my-2 flex justify-center">
                   <span className="rounded-full bg-gray-200/70 px-3 py-1 text-center text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-                    {systemMessageText(msg.content)}
+                    {systemMessageText(msg.content, {
+                      viewerId: session?.user?.id,
+                      senderId: msg.senderId,
+                    })}
                   </span>
                 </div>
               );
             }
 
             return (
-              <div key={index} className={`flex mb-2 ${isOwn ? "justify-end" : "justify-start"}`}>
+              <div key={index} className={`flex items-end gap-2 mb-2 ${isOwn ? "justify-end" : "justify-start"}`}>
+                {!isOwn && (
+                  <UserAvatar
+                    src={msg.senderId ? memberImages[msg.senderId] : null}
+                    name={msg.senderName}
+                    size={28}
+                  />
+                )}
                 <div className="relative max-w-xs sm:max-w-sm">
                   {/* Bubble */}
                   <div
@@ -814,11 +876,23 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
           disabled={!newMessage.trim()}
           className="p-2.5 rounded-full bg-blue-500 text-white hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          <TbSend size={18} />
+          <MdSend size={18} />
         </button>
       </div>
 
       {/* Rename group modal */}
+      {showPhotoDialog && groupDetails && (
+        <GroupPhotoDialog
+          groupId={group}
+          groupName={groupDetails.groupName}
+          image={groupDetails.image ?? null}
+          onClose={() => setShowPhotoDialog(false)}
+          onChange={(image) =>
+            setGroupDetails((prev) => (prev ? { ...prev, image } : prev))
+          }
+        />
+      )}
+
       {showRenameModal && (
         <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center">
           <div className="bg-white dark:bg-gray-900 rounded-xl p-6 max-w-sm w-full mx-4 shadow-2xl">

@@ -19,8 +19,14 @@ export async function GET() {
           },
         ],
       },
-      include: {
-        members: true,
+      // Only what the chat list renders. Never githubAccessToken or sshKey:
+      // this response goes to every member's browser.
+      select: {
+        id: true,
+        groupName: true,
+        githubRepo: true,
+        ownerName: true,
+        image: true,
       },
     });
 

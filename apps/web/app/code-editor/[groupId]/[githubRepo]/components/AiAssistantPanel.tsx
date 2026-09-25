@@ -1,11 +1,9 @@
 "use client";
 
-import React, { useState } from "react";
-import { Bot, MoreVertical, PanelRightClose, Send, Sparkles, X } from "lucide-react";
-import { cn } from "../../../../lib/utils";
+import React from "react";
+import { Bot, PanelRightClose, Sparkles, X } from "lucide-react";
 
 interface AiAssistantPanelProps {
-  fileName: string;
   /** Mobile sheet dismiss; omitted on desktop where the panel is docked. */
   onClose?: () => void;
   onGenerateReadme?: () => void;
@@ -15,21 +13,15 @@ interface AiAssistantPanelProps {
 }
 
 /**
- * AI Assistant surface.
- *
- * Layout only for now — the composer is disabled until the Groq streaming
- * endpoint lands. It says so plainly rather than accepting input and silently
- * doing nothing.
+ * AI tools for the repo. Only what works is shown: chat about the open file
+ * isn't built yet, so there is no disabled composer or placeholder for it.
  */
 export default function AiAssistantPanel({
-  fileName,
   onClose,
   onGenerateReadme,
   generatingReadme,
   onCollapse,
 }: AiAssistantPanelProps) {
-  const [draft, setDraft] = useState("");
-
   return (
     <aside className="flex h-full w-full flex-col border-l border-gray-200 bg-gray-50 dark:border-gray-800 dark:bg-gray-950 lg:w-80">
       <div className="flex shrink-0 items-center justify-between border-b border-gray-200 px-3 py-2.5 dark:border-gray-800">
@@ -48,12 +40,6 @@ export default function AiAssistantPanel({
               <PanelRightClose size={15} />
             </button>
           )}
-          <button
-            aria-label="Assistant options"
-            className="rounded p-1 text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-800"
-          >
-            <MoreVertical size={15} />
-          </button>
           {onClose && (
             <button
               onClick={onClose}
@@ -66,22 +52,11 @@ export default function AiAssistantPanel({
         </div>
       </div>
 
-      <div className="flex-1 space-y-3 overflow-y-auto p-3">
-        <div className="rounded-xl border border-purple-200 bg-white p-3 text-sm text-gray-700 dark:border-purple-900/50 dark:bg-gray-900 dark:text-gray-200">
-          <p>
-            Ask about{" "}
-            <code className="rounded bg-gray-100 px-1 py-0.5 text-[12px] dark:bg-gray-800">
-              {fileName || "the open file"}
-            </code>{" "}
-            — explanations, refactors, or a fix you can review before applying.
+      {onGenerateReadme && (
+        <div className="space-y-2 p-3">
+          <p className="text-sm text-gray-600 dark:text-gray-300">
+            Write a README for this repo from its files and code.
           </p>
-          <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
-            Chat isn&apos;t wired up yet. The panel is here so the layout is settled;
-            responses arrive with the next step.
-          </p>
-        </div>
-
-        {onGenerateReadme && (
           <button
             onClick={onGenerateReadme}
             disabled={generatingReadme}
@@ -90,31 +65,8 @@ export default function AiAssistantPanel({
             <Sparkles size={15} />
             {generatingReadme ? "Generating…" : "Generate AI README"}
           </button>
-        )}
-      </div>
-
-      <div className="shrink-0 border-t border-gray-200 p-2 dark:border-gray-800">
-        <div className="flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-3 py-2 dark:border-gray-700 dark:bg-gray-900">
-          <input
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            disabled
-            placeholder="Ask AI… (coming soon)"
-            aria-label="Ask the AI assistant"
-            className={cn(
-              "min-w-0 flex-1 bg-transparent text-sm text-gray-900 outline-none",
-              "placeholder:text-gray-400 disabled:cursor-not-allowed dark:text-white",
-            )}
-          />
-          <button
-            disabled
-            aria-label="Send"
-            className="shrink-0 text-purple-500 disabled:opacity-40"
-          >
-            <Send size={16} />
-          </button>
         </div>
-      </div>
+      )}
     </aside>
   );
 }

@@ -8,23 +8,25 @@ import { motion } from "framer-motion";
 import GroupChat from "../group/[groupId]/GroupChat";
 import ChatWithPhone from "../chat/[chatId]/ChatWithPhone";
 import PageTour from "./PageTour";
+import UserAvatar from "./UserAvatar";
 import { GrChat } from "react-icons/gr";
 import { Phone, Video } from "lucide-react";
 import { useCall } from "./call/CallProvider";
+import GroupAvatar from "./GroupAvatar";
 
 interface Group {
   ownerName: string;
   id: string;
-  name: string;
-  members: Array<{ userId: string }>;
   groupName: string;
   githubRepo: string;
+  image: string | null;
 }
 
 interface Friend {
   id: string;
   name: string | null;
   phone: string | null;
+  image: string | null;
 }
 
 export default function Component() {
@@ -180,9 +182,7 @@ export default function Component() {
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                      {(f.name ?? f.phone ?? "?")[0]?.toUpperCase()}
-                    </div>
+                    <UserAvatar src={f.image} name={f.name ?? f.phone} size={28} />
                     <span className="text-sm text-gray-800 dark:text-gray-100 truncate">
                       {f.name ?? f.phone}
                     </span>
@@ -246,9 +246,7 @@ export default function Component() {
                   onClick={() => handleGroupClick(group)}
                   className="flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition"
                 >
-                  <div className="w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                    {group.groupName?.[0]?.toUpperCase() ?? "G"}
-                  </div>
+                  <GroupAvatar name={group.groupName} image={group.image} size={28} />
                   <div className="flex-1 min-w-0 overflow-hidden">
                     <p className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate">{group.groupName}</p>
                     {/* <a

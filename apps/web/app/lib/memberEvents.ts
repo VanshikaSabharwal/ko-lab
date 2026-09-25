@@ -1,5 +1,5 @@
 import prisma from "./prisma";
-import { SYSTEM_MESSAGE_PREFIX } from "./systemMessages";
+import { memberAddedMessage } from "./systemMessages";
 import { pushToUsers } from "./pushClient";
 
 /**
@@ -77,7 +77,12 @@ export async function recordMemberInvited({
           groupId,
           senderId: actorId,
           senderName: actorName,
-          message: `${SYSTEM_MESSAGE_PREFIX}${actorName} added ${inviteeName} to the group`,
+          message: memberAddedMessage({
+            actorId,
+            actorName,
+            inviteeId: inviteeId ?? null,
+            inviteeName,
+          }),
         },
       }),
     );

@@ -9,7 +9,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../app/lib/prisma", () => ({
-  default: { notifications: { findMany: vi.fn() } },
+  default: { notifications: { findMany: vi.fn(), updateMany: vi.fn() } },
 }));
 
 vi.mock("../../app/lib/apiAuth", () => ({
@@ -17,7 +17,7 @@ vi.mock("../../app/lib/apiAuth", () => ({
   unauthorized: () => new Response(null, { status: 401 }),
 }));
 
-import { GET } from "../../app/api/notifications/route";
+import { GET, PATCH } from "../../app/api/notifications/route";
 import prisma from "../../app/lib/prisma";
 import { getSessionUser } from "../../app/lib/apiAuth";
 
@@ -74,5 +74,42 @@ describe("GET /api/notifications", () => {
     (getSessionUser as ReturnType<typeof vi.fn>).mockResolvedValue(null);
     const res = await GET();
     expect(res.status).toBe(401);
+  });
+});
+
+/**
+ * Viewing notifications marks them read, so the unread badge stays cleared
+ * after a reload instead of counting every notification ever received.
+ */
+describe("PATCH /api/notifications", () => {
+  beforeEach(() => {
+    (prisma.notifications.updateMany as ReturnType<typeof vi.fn>).mockResolvedValue({ count: 2 });
+  });
+
+  function updateCall() {
+    return (prisma.notifications.updateMany as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+  }
+
+  it("marks only the caller's unread notifications as read", async () => {
+    const res = await PATCH();
+    expect(res.status).toBe(200);
+    expect((await res.json()).marked).toBe(2);
+
+    const { where, data } = updateCall();
+    expect(where.readAt).toBeNull();
+    expect(data.readAt).toBeInstanceOf(Date);
+  });
+
+  it("uses the same addressing as the list, so it can't clear someone else's", async () => {
+    await PATCH();
+    await GET();
+    expect(updateCall().where.OR).toEqual(whereClause().OR);
+  });
+
+  it("rejects an anonymous caller", async () => {
+    (getSessionUser as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    const res = await PATCH();
+    expect(res.status).toBe(401);
+    expect(prisma.notifications.updateMany).not.toHaveBeenCalled();
   });
 });

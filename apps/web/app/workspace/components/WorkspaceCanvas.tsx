@@ -271,7 +271,7 @@ export default function WorkspaceCanvas({
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <PresenceBar userIds={presence} currentUserId={currentUserId} />
+          <PresenceBar groupId={groupId} userIds={presence} currentUserId={currentUserId} />
           {rightPanel && (
             <button
               onClick={() => setPanel((p) => (p === "right" ? "none" : "right"))}

@@ -29,7 +29,7 @@ type RepoInvitation = {
 };
 
 export default function ProfilePage() {
-  const { status } = useSession();
+  const { status, update: updateSession } = useSession();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -146,6 +146,8 @@ export default function ProfilePage() {
         toast.success("Avatar updated", { id: toastId });
         setProfile((p) => (p ? { ...p, image } : p));
         succeeded = true;
+        // Re-reads the photo into the session so the header avatar updates now
+        void updateSession();
       } else {
         const d = await res.json().catch(() => ({}));
         toast.error(d.error ?? "Failed to upload avatar", { id: toastId });

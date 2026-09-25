@@ -204,6 +204,16 @@ export default function UiDesign({ groupId }: UiDesignProps) {
     setSelectedIds([]);
   }, [selectedIds, handleNodesChange, onEdgesChange]);
 
+  /** Remove everything on the board. Undo brings it back. */
+  const clearBoard = useCallback(() => {
+    if (!nodesRef.current.length) return;
+    const edgeRemovals = edgesRef.current.map((e) => ({ id: e.id, type: "remove" as const }));
+    // handleNodesChange pushes history for remove changes
+    handleNodesChange(nodesRef.current.map((n) => ({ id: n.id, type: "remove" as const })));
+    if (edgeRemovals.length) onEdgesChange(edgeRemovals);
+    setSelectedIds([]);
+  }, [handleNodesChange, onEdgesChange]);
+
   // ── Grouping ──
   // Selection is groupable only when 2+ top-level nodes are picked. Nodes that
   // already belong to a group are excluded: nesting isn't supported yet, and
@@ -422,6 +432,8 @@ export default function UiDesign({ groupId }: UiDesignProps) {
           canUngroup={!!ungroupTargetId}
           onGroup={groupSelection}
           onUngroup={ungroupSelection}
+          canClear={nodes.length > 0}
+          onClear={clearBoard}
         />
       }
       overlay={

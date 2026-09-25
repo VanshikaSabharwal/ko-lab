@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { getSessionUser, unauthorized } from "../../../lib/apiAuth";
-import { signLinkState, getBaseUrl } from "../../../lib/githubLink";
+import {
+  signLinkState,
+  getBaseUrl,
+  newLinkNonce,
+  LINK_NONCE_COOKIE,
+  LINK_NONCE_TTL_SECONDS,
+} from "../../../lib/githubLink";
 
 // Step 1 of manual GitHub linking: redirect the logged-in user to GitHub's
 // authorize page with a signed state carrying their Ko-Lab user id.
@@ -15,7 +21,8 @@ export async function GET() {
   }
 
   const redirectUri = `${getBaseUrl()}/api/github/link/callback`;
-  const state = signLinkState(me.id);
+  const nonce = newLinkNonce();
+  const state = signLinkState(me.id, nonce);
 
   const authorizeUrl = new URL("https://github.com/login/oauth/authorize");
   authorizeUrl.searchParams.set("client_id", clientId);
@@ -26,5 +33,15 @@ export async function GET() {
   // from any they're currently signed into.
   authorizeUrl.searchParams.set("allow_signup", "false");
 
-  return NextResponse.redirect(authorizeUrl.toString());
+  const res = NextResponse.redirect(authorizeUrl.toString());
+  // Ties the state to this browser; see LINK_NONCE_COOKIE. Lax (not Strict)
+  // so it's still sent on the top-level redirect back from GitHub.
+  res.cookies.set(LINK_NONCE_COOKIE, nonce, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/api/github/link",
+    maxAge: LINK_NONCE_TTL_SECONDS,
+  });
+  return res;
 }

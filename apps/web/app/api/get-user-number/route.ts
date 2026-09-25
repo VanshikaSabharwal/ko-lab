@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   try {
     const user = await prisma.user.findFirst({
       where: { OR: [{ email: email ?? undefined }, { id: id ?? undefined }, { phone: phone ?? undefined }] },
-      select: { id: true, phone: true, name: true },
+      select: { id: true, phone: true, name: true, image: true },
     });
 
     if (!user) {

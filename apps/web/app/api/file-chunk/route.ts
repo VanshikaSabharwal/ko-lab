@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUser, unauthorized } from "../../lib/apiAuth";
-import { resolveRepoAccess, CHUNK_SIZE } from "../../lib/githubFiles";
+import { resolveRepoAccess, safeContentsPath, CHUNK_SIZE } from "../../lib/githubFiles";
 
 /**
  * Serves one byte range of a file, for the virtualized large-file viewer.
@@ -34,6 +34,11 @@ export async function POST(req: Request) {
       );
     }
 
+    const contentsPath = safeContentsPath(filePath);
+    if (!contentsPath) {
+      return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
+    }
+
     const offset = Math.max(0, Math.floor(start));
     const size = Math.min(
       Math.max(1, Math.floor(length ?? CHUNK_SIZE)),
@@ -49,7 +54,7 @@ export async function POST(req: Request) {
     const refQuery = ref ? `?ref=${encodeURIComponent(ref)}` : "";
     const end = offset + size - 1;
 
-    const res = await fetch(`${base}/contents/${filePath}${refQuery}`, {
+    const res = await fetch(`${base}/contents/${contentsPath}${refQuery}`, {
       headers: {
         ...headers,
         // Raw bytes, not the JSON envelope — the envelope can't be ranged

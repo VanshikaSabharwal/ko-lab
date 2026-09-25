@@ -26,13 +26,33 @@ const EXTENSIONS: Record<string, string> = {
   "image/webp": "webp",
 };
 
-export async function uploadAvatar(
+/** Image types and size accepted for profile and group photos. */
+export const ALLOWED_IMAGE_TYPES = Object.keys(EXTENSIONS);
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+export function uploadAvatar(
   userId: string,
   buffer: Buffer,
   contentType: string,
 ): Promise<string> {
+  return uploadImage(`avatars/${userId}`, buffer, contentType);
+}
+
+export function uploadGroupImage(
+  groupId: string,
+  buffer: Buffer,
+  contentType: string,
+): Promise<string> {
+  return uploadImage(`group-images/${groupId}`, buffer, contentType);
+}
+
+async function uploadImage(
+  prefix: string,
+  buffer: Buffer,
+  contentType: string,
+): Promise<string> {
   const ext = EXTENSIONS[contentType] || "bin";
-  const key = `avatars/${userId}/${randomUUID()}.${ext}`;
+  const key = `${prefix}/${randomUUID()}.${ext}`;
 
   await s3Client.send(
     new PutObjectCommand({

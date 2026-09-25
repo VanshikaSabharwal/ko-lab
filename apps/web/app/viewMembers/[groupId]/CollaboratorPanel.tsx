@@ -70,9 +70,7 @@ export default function CollaboratorPanel({ groupId }: { groupId: string }) {
       const json = await res.json();
       if (res.ok) {
         if (json.codeAccess === "PENDING_GITHUB") {
-          toast("They haven't connected GitHub yet — the invite will send automatically once they do.", {
-            icon: "⏳",
-          });
+          toast("They haven't connected GitHub yet — the invite will send automatically once they do.");
         } else if (json.codeAccess === "ACTIVE") {
           toast.success("Already a collaborator");
         } else {
@@ -93,13 +91,18 @@ export default function CollaboratorPanel({ groupId }: { groupId: string }) {
     }
   };
 
-  if (!data) return null;
+  // Nobody to give access to yet: an empty "Code access" heading just confused people
+  if (!data || data.members.length === 0) return null;
 
   return (
     <div className="w-full max-w-md mt-8">
-      <h2 className="mb-3 flex items-center gap-2 text-lg font-semibold">
+      <h2 className="mb-1 flex items-center gap-2 text-lg font-semibold">
         <FaGithub /> Code access
       </h2>
+      <p className="mb-3 text-sm text-gray-500 dark:text-gray-400">
+        Only you can see this. Invite members as GitHub collaborators so they can edit code
+        and open change requests on {data.repo}.
+      </p>
       <ul className="space-y-2">
         {data.members.map((member) => {
           const s = STATUS[member.codeAccess];

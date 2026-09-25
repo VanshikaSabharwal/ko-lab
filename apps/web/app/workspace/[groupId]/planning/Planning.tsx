@@ -119,10 +119,10 @@ export default function Planning({ groupId }: PlanningProps) {
       <WorkspaceSidebar
         groupId={groupId}
         groupName={board.groupName}
+        groupImage={board.groupImage}
         members={board.members}
         progress={progress}
         active="planning"
-        counts={{ tasks: board.tasks.length }}
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
       />
@@ -241,6 +241,7 @@ export default function Planning({ groupId }: PlanningProps) {
           <WorkspaceDetailsPanel
             groupId={groupId}
             groupName={board.groupName}
+            groupImage={board.groupImage}
             columns={board.columns}
             tasks={board.tasks}
             milestones={board.milestones}
@@ -264,6 +265,7 @@ export default function Planning({ groupId }: PlanningProps) {
             <WorkspaceDetailsPanel
               groupId={groupId}
               groupName={board.groupName}
+              groupImage={board.groupImage}
               columns={board.columns}
               tasks={board.tasks}
               milestones={board.milestones}

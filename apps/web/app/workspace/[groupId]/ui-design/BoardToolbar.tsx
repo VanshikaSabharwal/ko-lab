@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { getNodesBounds, getViewportForBounds, useReactFlow } from "@xyflow/react";
 import { useTheme } from "next-themes";
 import { toPng } from "html-to-image";
-import { Undo2, Redo2, Magnet, ImageDown, Group, Ungroup } from "lucide-react";
+import { Undo2, Redo2, Magnet, ImageDown, Group, Ungroup, Eraser } from "lucide-react";
 import toast from "react-hot-toast";
 
 interface BoardToolbarProps {
@@ -18,6 +18,8 @@ interface BoardToolbarProps {
   canUngroup: boolean;
   onGroup: () => void;
   onUngroup: () => void;
+  canClear: boolean;
+  onClear: () => void;
 }
 
 const btnCls =
@@ -34,10 +36,27 @@ export default function BoardToolbar({
   canUngroup,
   onGroup,
   onUngroup,
+  canClear,
+  onClear,
 }: BoardToolbarProps) {
   const { getNodes } = useReactFlow();
   const { resolvedTheme } = useTheme();
   const [exporting, setExporting] = useState(false);
+  // Clearing wipes the board for everyone in the group, so it takes a second click
+  const [confirmClear, setConfirmClear] = useState(false);
+
+  useEffect(() => {
+    if (!confirmClear) return;
+    const t = setTimeout(() => setConfirmClear(false), 3000);
+    return () => clearTimeout(t);
+  }, [confirmClear]);
+
+  const handleClear = () => {
+    if (!confirmClear) return setConfirmClear(true);
+    setConfirmClear(false);
+    onClear();
+    toast("Board cleared. Undo brings it back.");
+  };
 
   const exportPng = async () => {
     const nodes = getNodes();
@@ -112,6 +131,17 @@ export default function BoardToolbar({
       <button className={btnCls} onClick={exportPng} disabled={exporting} title="Export board as PNG">
         <ImageDown size={13} />
         <span className="hidden sm:inline">{exporting ? "Exporting…" : "Export PNG"}</span>
+      </button>
+      <button
+        className={`${btnCls} ${confirmClear ? "!border-red-500 !bg-red-600 !text-white" : ""}`}
+        onClick={handleClear}
+        disabled={!canClear}
+        title="Remove everything from the board (Undo restores it)"
+      >
+        <Eraser size={13} />
+        <span className={confirmClear ? "inline" : "hidden sm:inline"}>
+          {confirmClear ? "Click again to clear" : "Clear board"}
+        </span>
       </button>
     </div>
   );

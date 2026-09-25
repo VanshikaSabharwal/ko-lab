@@ -72,6 +72,38 @@ export function looksBinary(buf: Buffer, ext: string): boolean {
   return buf.subarray(0, 8000).includes(0);
 }
 
+/**
+ * A repo file path made safe to append to `/repos/{owner}/{repo}/contents/`.
+ *
+ * URLs resolve `..`, so an unchecked path like `../../other/repo/contents/.env`
+ * walked out of the group's repo — while carrying the owner's token — to any
+ * repo or endpoint that token can reach. Each segment is also percent-encoded
+ * so a `?` or `#` can't rewrite the query or fragment.
+ *
+ * Returns null for anything that isn't a plain relative path.
+ */
+export function safeContentsPath(filePath: unknown): string | null {
+  if (typeof filePath !== "string") return null;
+  const trimmed = filePath.replace(/^\/+|\/+$/g, "");
+  if (!trimmed || trimmed.length > 1024) return null;
+  // Backslashes and control characters have no place in a repo path
+  if (/[\\\u0000-\u001f\u007f]/.test(trimmed)) return null;
+
+  const segments = trimmed.split("/");
+  for (const seg of segments) {
+    // Decoded too, since `%2e%2e` is treated as `..` by URL parsers. A `%` that
+    // doesn't decode (a file named `100%.txt`) is just a literal character.
+    let decoded = seg;
+    try {
+      decoded = decodeURIComponent(seg);
+    } catch {
+      // keep the raw segment
+    }
+    if (seg === "" || decoded === "." || decoded === "..") return null;
+  }
+  return segments.map(encodeURIComponent).join("/");
+}
+
 export interface RepoAccess {
   base: string;
   headers: Record<string, string>;

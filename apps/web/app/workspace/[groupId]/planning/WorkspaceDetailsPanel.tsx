@@ -5,6 +5,7 @@ import Image from "next/image";
 import toast from "react-hot-toast";
 import { Check, Flag, Pencil, Plus, UserPlus, X } from "lucide-react";
 import AvatarStack from "../../components/AvatarStack";
+import GroupAvatar from "../../../components/GroupAvatar";
 import type { AvatarUser } from "../../components/Avatar";
 import { boardProgress } from "../../lib/boardProgress";
 import type {
@@ -23,6 +24,7 @@ import { cn } from "../../../lib/utils";
 interface WorkspaceDetailsPanelProps {
   groupId: string;
   groupName: string;
+  groupImage?: string | null;
   columns: PlanningColumn[];
   tasks: PlanningTask[];
   milestones: PlanningMilestone[];
@@ -49,6 +51,7 @@ function formatDue(iso: string): string {
 export default function WorkspaceDetailsPanel({
   groupId,
   groupName,
+  groupImage,
   columns,
   tasks,
   milestones,
@@ -143,9 +146,12 @@ export default function WorkspaceDetailsPanel({
       )}
 
       <div className="px-3">
-        <h3 className="truncate text-sm font-semibold text-gray-900 dark:text-white">
-          {groupName}
-        </h3>
+        <div className="flex items-center gap-2">
+          <GroupAvatar name={groupName} image={groupImage} size={28} />
+          <h3 className="min-w-0 truncate text-sm font-semibold text-gray-900 dark:text-white">
+            {groupName}
+          </h3>
+        </div>
 
         {editing ? (
           <div className="mt-2">

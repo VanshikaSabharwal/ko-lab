@@ -98,6 +98,7 @@ export function usePlanningData({ groupId, userId }: { groupId: string; userId?:
   const [state, setState] = useState<BoardState>(EMPTY);
   const [members, setMembers] = useState<GroupMemberSummary[]>([]);
   const [groupName, setGroupName] = useState("Workspace");
+  const [groupImage, setGroupImage] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(0);
 
@@ -219,6 +220,7 @@ export function usePlanningData({ groupId, userId }: { groupId: string; userId?:
         if (memberData) {
           setMembers(memberData.members ?? []);
           if (memberData.groupName) setGroupName(memberData.groupName);
+          setGroupImage(memberData.groupImage ?? null);
         }
         setLoaded(true);
       })
@@ -468,6 +470,7 @@ export function usePlanningData({ groupId, userId }: { groupId: string; userId?:
     members,
     membersById,
     groupName,
+    groupImage,
     loaded,
     isConnected,
     isOffline,

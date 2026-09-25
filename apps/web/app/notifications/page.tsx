@@ -65,7 +65,15 @@ const NotificationsPage = () => {
         const notificationsData = await notificationsRes.json();
         const rejectionsData = await rejectionsRes.json();
 
-        if (notificationsData.success) setNotifications(notificationsData.notifications);
+        if (notificationsData.success) {
+          setNotifications(notificationsData.notifications);
+          // They're on screen now, so they're seen: clear the unread badge for good
+          if (notificationsData.notifications.some((n: { readAt: string | null }) => !n.readAt)) {
+            fetch("/api/notifications", { method: "PATCH" })
+              .then(() => window.dispatchEvent(new Event("ko-lab:notifications-read")))
+              .catch(() => {});
+          }
+        }
         if (rejectionsData.success) setRejections(rejectionsData.rejectedNotification);
 
         if (myPhone) {

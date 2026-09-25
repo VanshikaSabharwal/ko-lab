@@ -158,6 +158,8 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
           // them rendered empty bubbles stamped "Invalid Date" — they have no
           // content or createdAt. Only chat messages belong here.
           if (message.type || !message.content) return;
+          // Direct messages reach every socket a user has; keep only this group's
+          if (message.groupId !== group) return;
           setMessages((prevMessages) => [
             ...prevMessages,
             {

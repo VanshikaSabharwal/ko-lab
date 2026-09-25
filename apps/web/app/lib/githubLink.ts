@@ -13,13 +13,25 @@ function b64url(buf: Buffer): string {
   return buf.toString("base64url");
 }
 
-export function signLinkState(userId: string): string {
+/**
+ * Cookie holding the nonce signed into the state. The callback requires the
+ * two to match, so a state only completes in the browser that started it —
+ * an authorize link sent to someone else can't finish on their account.
+ */
+export const LINK_NONCE_COOKIE = "gh_link_nonce";
+export const LINK_NONCE_TTL_SECONDS = STATE_TTL_SECONDS;
+
+export function newLinkNonce(): string {
+  return randomBytes(16).toString("hex");
+}
+
+export function signLinkState(userId: string, nonce: string): string {
   if (!SECRET) throw new Error("NEXTAUTH_SECRET must be set to sign link state");
   const payload = b64url(
     Buffer.from(
       JSON.stringify({
         sub: userId,
-        nonce: randomBytes(8).toString("hex"),
+        nonce,
         exp: Math.floor(Date.now() / 1000) + STATE_TTL_SECONDS,
       }),
     ),
@@ -28,7 +40,7 @@ export function signLinkState(userId: string): string {
   return `${payload}.${sig}`;
 }
 
-export function verifyLinkState(state: string): string | null {
+export function verifyLinkState(state: string): { userId: string; nonce: string } | null {
   if (!SECRET) return null;
   const [payload, sig] = state.split(".");
   if (!payload || !sig) return null;
@@ -40,8 +52,9 @@ export function verifyLinkState(state: string): string | null {
   try {
     const data = JSON.parse(Buffer.from(payload, "base64url").toString());
     if (typeof data.sub !== "string" || typeof data.exp !== "number") return null;
+    if (typeof data.nonce !== "string") return null;
     if (data.exp < Math.floor(Date.now() / 1000)) return null;
-    return data.sub;
+    return { userId: data.sub, nonce: data.nonce };
   } catch {
     return null;
   }

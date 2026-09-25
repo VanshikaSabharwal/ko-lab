@@ -14,7 +14,8 @@ import { rust } from "@codemirror/lang-rust";
 import { php } from "@codemirror/lang-php";
 import { sql } from "@codemirror/lang-sql";
 import { cpp } from "@codemirror/lang-cpp";
-import { type Extension } from "@codemirror/state";
+import { type Extension, Prec } from "@codemirror/state";
+import { keymap } from "@codemirror/view";
 import { hasLinter } from "./lib/fileTypes";
 import CodeMirror from "@uiw/react-codemirror";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
@@ -29,17 +30,23 @@ import EditorStatusBar from "./components/EditorStatusBar";
 import AiAssistantPanel from "./components/AiAssistantPanel";
 import CollaborationPanel from "./components/CollaborationPanel";
 import TrashPanel, { type TrashItem } from "./components/TrashPanel";
+import OutputPanel from "./components/OutputPanel";
+import SettingsPanel from "./components/SettingsPanel";
+import { useIdeSettings } from "./lib/ideSettings";
+import { useTheme } from "next-themes";
+import LiveSiteControl from "./components/LiveSiteControl";
+import { useLivePreview } from "./lib/useLivePreview";
+import TerminalPanel, { OPEN_TERMINAL_AFTER_RELOAD_KEY } from "./components/TerminalPanel";
+import { syncFileToContainer } from "./lib/webContainer";
+import { useCodeRunner } from "../../../lib/codeRunner/useCodeRunner";
+import { getRunLanguage } from "../../../lib/codeRunner/paths";
 import LargeFileViewer from "./LargeFileViewer";
 import ImagePreview from "./ImagePreview";
 import { Bot } from "lucide-react";
 import {
-  Globe,
-  ExternalLink,
-  Settings,
   FileText,
   Sparkles,
   X,
-  Check,
   Folder,
   FolderOpen,
   FileCode,
@@ -50,6 +57,8 @@ import {
   GitBranch,
   Trash2,
   Undo2,
+  Play,
+  Square,
 } from "lucide-react";
 
 interface CodeProps {
@@ -340,9 +349,7 @@ export default function Editor({ github, group }: CodeProps) {
   const userId = session?.user.id;
   const [filePath, setFilePath] = useState<string>("");
   const [saving, setSaving] = useState(false);
-  const [liveUrl, setLiveUrl] = useState<string>("");
-  const [editingUrl, setEditingUrl] = useState(false);
-  const [urlInput, setUrlInput] = useState("");
+  const livePreview = useLivePreview(group);
   const [generatingReadme, setGeneratingReadme] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   // Code access: editing is gated on accepted GitHub collaborator status.
@@ -376,6 +383,23 @@ export default function Editor({ github, group }: CodeProps) {
   // expire ~8h) — show a reconnect banner.
   const [authExpired, setAuthExpired] = useState(false);
   const [ideSection, setIdeSection] = useState<IdeSection>("files");
+  // The terminal mounts on first visit and then stays mounted (hidden when
+  // another section is open), so its shell and running server keep going.
+  const [terminalOpened, setTerminalOpened] = useState(false);
+  useEffect(() => {
+    if (ideSection === "terminal") setTerminalOpened(true);
+  }, [ideSection]);
+  // Back from the reload that enabled the terminal: reopen it
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem(OPEN_TERMINAL_AFTER_RELOAD_KEY)) {
+        sessionStorage.removeItem(OPEN_TERMINAL_AFTER_RELOAD_KEY);
+        setIdeSection("terminal");
+      }
+    } catch {
+      /* storage blocked: stay on Files */
+    }
+  }, []);
   const [fileSearch, setFileSearch] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
@@ -412,7 +436,7 @@ export default function Editor({ github, group }: CodeProps) {
         window.location.reload();
       } else if (data.needsRelink) {
         // The owner's own GitHub sign-in is also stale — re-authorize, then retry
-        toast("Re-authorizing GitHub…", { icon: "🔑" });
+        toast("Re-authorizing GitHub…");
         window.location.href = "/api/github/link";
       } else if (res.status === 403) {
         toast.error("Only the group owner can reconnect GitHub.");
@@ -560,10 +584,7 @@ export default function Editor({ github, group }: CodeProps) {
     if (group && github) {
       const init = async () => {
         try {
-          const [filesRes, urlRes] = await Promise.all([
-            fetch(`/api/files?group=${group}`),
-            fetch(`/api/group-live-url?groupId=${group}`),
-          ]);
+          const filesRes = await fetch(`/api/files?group=${group}`);
 
           if (filesRes.ok) {
             const data: CodeFile[] = await filesRes.json();
@@ -576,14 +597,8 @@ export default function Editor({ github, group }: CodeProps) {
             if (errBody.code === "GITHUB_AUTH_EXPIRED") {
               setAuthExpired(true);
             } else {
-              toast.error("Failed to load the files.");
-            }
-          }
-
-          if (urlRes.ok) {
-            const urlData = await urlRes.json();
-            if (urlData.liveUrl) {
-              setLiveUrl(urlData.liveUrl);
+              // The fixed id keeps a repeated load (e.g. dev re-running effects) to one toast
+              toast.error(errBody.error || "Failed to load the files.", { id: "files-load" });
             }
           }
 
@@ -608,7 +623,7 @@ export default function Editor({ github, group }: CodeProps) {
             })
             .catch(() => {});
         } catch {
-          toast.error("Failed to load the files.");
+          toast.error("Failed to load the files.", { id: "files-load" });
         } finally {
           setLoading(false);
         }
@@ -802,6 +817,9 @@ export default function Editor({ github, group }: CodeProps) {
       setOriginalContent(fileContent);
       toast.success(`Saved ${fileName}`);
       setIsEdited(false);
+      void livePreview.syncSavedFile(filePath, fileContent);
+      // A server started with --watch/nodemon in the terminal picks this up
+      syncFileToContainer(filePath, fileContent).catch(() => {});
     } catch {
       toast.error("Failed to save the file.");
     } finally {
@@ -813,33 +831,6 @@ export default function Editor({ github, group }: CodeProps) {
   const handleRaiseChangeRequest = async () => {
     if (isEdited) await handleSave();
     router.push(`/confirm-changes/${group}`);
-  };
-
-  const handleSaveLiveUrl = async () => {
-    try {
-      const res = await fetch("/api/group-live-url", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          groupId: group,
-          liveUrl: urlInput,
-          userId,
-        }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to save URL");
-      }
-
-      setLiveUrl(urlInput);
-      setEditingUrl(false);
-      toast.success(urlInput ? "Live URL saved!" : "Live URL removed");
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : "Failed to save URL",
-      );
-    }
   };
 
   const handleGenerateReadme = async () => {
@@ -1118,6 +1109,99 @@ export default function Editor({ github, group }: CodeProps) {
     return `/api/file-download?${params.toString()}`;
   }, [group, filePath, currentBranch]);
 
+  // ── Editor settings (font size, theme) ────────────────────────────────────
+  const { resolvedTheme } = useTheme();
+  const ide = useIdeSettings(resolvedTheme !== "light");
+
+  // ── Run code ──────────────────────────────────────────────────────────────
+  const {
+    state: runState,
+    run: startRunner,
+    stop: stopRunner,
+    clear: clearOutput,
+    appendOutput,
+  } = useCodeRunner();
+  const [outputOpen, setOutputOpen] = useState(false);
+  const runLanguage = fileNotice ? null : getRunLanguage(filePath);
+  const runnerBusy = runState.phase === "preparing" || runState.phase === "running";
+
+  /** Text of another repo file for the runner: the tab cache first, then the server. */
+  const readRepoText = useCallback(
+    async (path: string): Promise<string | null> => {
+      const cacheKey = `${currentBranch}:${path}`;
+      const cached = contentCache.current.get(cacheKey);
+      if (cached !== undefined) return cached;
+      try {
+        const res = await fetch("/api/file-content", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ groupId: group, filePath: path, ref: currentBranch || undefined }),
+        });
+        if (!res.ok) return null;
+        const data = await res.json();
+        if (typeof data.content !== "string" || noticeFor(data, path.split("/").pop() ?? path)) {
+          return null;
+        }
+        contentCache.current.set(cacheKey, data.content);
+        return data.content;
+      } catch {
+        return null;
+      }
+    },
+    [group, currentBranch],
+  );
+
+  const runPath = useCallback(
+    (entry: string, entrySource: string) => {
+      const available = new Set(files.map((f) => f.path).filter((p) => !deletedPaths.has(p)));
+      setOutputOpen(true);
+      void startRunner({
+        entry,
+        entrySource,
+        exists: (p) => available.has(p),
+        // The open tab's text includes unsaved edits
+        read: (p) => (p === filePath ? Promise.resolve(fileContent) : readRepoText(p)),
+      });
+    },
+    [files, deletedPaths, filePath, fileContent, readRepoText, startRunner],
+  );
+
+  /** Returns false when the open file can't be run. */
+  const runCurrentFile = useCallback(() => {
+    if (!runLanguage || !filePath) return false;
+    runPath(filePath, fileContent);
+    return true;
+  }, [runLanguage, filePath, fileContent, runPath]);
+
+  // "Run again" re-runs the file that produced the output, even after switching tabs
+  const runAgain = useCallback(() => {
+    const entry = runState.entry;
+    if (!entry) return;
+    if (entry === filePath) return runPath(entry, fileContent);
+    void readRepoText(entry).then((text) => {
+      if (text !== null) runPath(entry, text);
+      else toast.error(`Couldn't read ${entry}`);
+    });
+  }, [runState.entry, filePath, fileContent, runPath, readRepoText]);
+
+  // CodeMirror extensions are built once per render; the ref keeps Ctrl/Cmd+Enter
+  // pointed at the latest file and buffer without rebuilding the keymap.
+  const runShortcutRef = useRef(runCurrentFile);
+  runShortcutRef.current = runCurrentFile;
+  const runKeymap = useMemo(
+    () =>
+      Prec.highest(
+        keymap.of([
+          {
+            key: "Mod-Enter",
+            // Not runnable → fall through to CodeMirror's own Mod-Enter
+            run: () => runShortcutRef.current(),
+          },
+        ]),
+      ),
+    [],
+  );
+
   return (
     <IdeShell
       repo={github}
@@ -1145,7 +1229,15 @@ export default function Editor({ github, group }: CodeProps) {
       }
     >
       {/* Main Content Area */}
-      {ideSection === "collaboration" ? (
+      {terminalOpened && (
+        <TerminalPanel
+          groupId={group}
+          branch={currentBranch}
+          active={ideSection === "terminal"}
+          hasUnsavedChanges={isEdited}
+        />
+      )}
+      {ideSection === "terminal" ? null : ideSection === "collaboration" ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <CollaborationPanel groupId={group} repo={github} />
         </div>
@@ -1160,76 +1252,23 @@ export default function Editor({ github, group }: CodeProps) {
           />
         </div>
       ) : ideSection === "settings" ? (
-        <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6 text-center">
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Settings are coming soon.
-          </p>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <SettingsPanel
+            ide={ide}
+            autoUpdateLiveSite={livePreview.autoUpdate}
+            onAutoUpdateLiveSiteChange={livePreview.setAutoUpdate}
+          />
         </div>
       ) : (
       <div className="flex min-w-0 min-h-0 flex-1 flex-col">
         {/* Top Toolbar */}
         <div className="flex items-center justify-between px-4 py-2 bg-gray-800/80 border-b border-gray-700/50">
           <div className="flex items-center gap-2 min-w-0">
-            <Globe className="w-4 h-4 text-gray-500 shrink-0" />
-            {editingUrl ? (
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="url"
-                  value={urlInput}
-                  onChange={(e) => setUrlInput(e.target.value)}
-                  placeholder="https://your-site.vercel.app"
-                  className="px-2 py-1 text-xs text-gray-900 rounded bg-gray-100 w-56 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  autoFocus
-                />
-                <button
-                  onClick={handleSaveLiveUrl}
-                  className="p-1 rounded bg-green-600 hover:bg-green-500"
-                  title="Save"
-                >
-                  <Check size={14} />
-                </button>
-                <button
-                  onClick={() => setEditingUrl(false)}
-                  className="p-1 rounded bg-gray-600 hover:bg-gray-500"
-                  title="Cancel"
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            ) : liveUrl ? (
-              <div className="flex items-center gap-1.5 min-w-0">
-                <a
-                  href={liveUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs text-blue-400 hover:text-blue-300 underline truncate flex items-center gap-1"
-                >
-                  {liveUrl}
-                  <ExternalLink size={12} />
-                </a>
-                <button
-                  onClick={() => {
-                    setUrlInput(liveUrl);
-                    setEditingUrl(true);
-                  }}
-                  className="p-1 rounded hover:bg-gray-700 shrink-0"
-                  title="Edit URL"
-                >
-                  <Settings size={13} className="text-gray-400" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => {
-                  setUrlInput("");
-                  setEditingUrl(true);
-                }}
-                className="text-xs text-gray-500 hover:text-gray-300 flex items-center gap-1"
-              >
-                <Settings size={13} />
-                Set Live URL
-              </button>
-            )}
+            <LiveSiteControl
+              live={livePreview}
+              branch={currentBranch}
+              unsaved={isEdited && filePath ? { path: filePath, content: fileContent } : undefined}
+            />
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <span className="text-xs text-gray-500">
@@ -1270,6 +1309,32 @@ export default function Editor({ github, group }: CodeProps) {
             if (f) handleFileClick(f);
           }}
           onClose={closeTab}
+          actions={
+            runnerBusy && runState.entry === filePath ? (
+              <button
+                onClick={stopRunner}
+                title="Stop"
+                className="flex items-center gap-1 rounded bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-500"
+              >
+                <Square size={11} className="fill-current" />
+                Stop
+              </button>
+            ) : (
+              <button
+                onClick={runCurrentFile}
+                disabled={!runLanguage}
+                title={
+                  runLanguage
+                    ? `Run ${activeFileName} (Ctrl/Cmd+Enter)`
+                    : "Only JavaScript, TypeScript, Python and HTML files can run in the browser. Use Make it live to host a whole static site."
+                }
+                className="flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:bg-gray-700 disabled:text-gray-400"
+              >
+                <Play size={11} className="fill-current" />
+                {runLanguage === "html" ? "Preview" : "Run"}
+              </button>
+            )
+          }
         />
 
         <EditorBreadcrumb repo={github} path={filePath} />
@@ -1399,7 +1464,7 @@ export default function Editor({ github, group }: CodeProps) {
                 // long files get clipped. Growing to content lets the wrapper
                 // above scroll, with a minimum so short files still fill it.
                 minHeight="100%"
-                theme="dark"
+                theme={ide.theme.extension}
                 editable={canEdit}
                 readOnly={!canEdit}
                 // Language parsing and JSON linting both walk the whole
@@ -1407,8 +1472,14 @@ export default function Editor({ github, group }: CodeProps) {
                 // traversal, not the rendering, is what stalls the tab.
                 extensions={
                   heavyFile || sizeReadOnly
-                    ? []
-                    : [getFileLanguage(fileName), lintExtension, lintGutter()]
+                    ? [runKeymap, ide.fontSizeExtension]
+                    : [
+                        runKeymap,
+                        ide.fontSizeExtension,
+                        getFileLanguage(fileName),
+                        lintExtension,
+                        lintGutter(),
+                      ]
                 }
                 onChange={handleFileChange}
                 basicSetup={{
@@ -1425,6 +1496,20 @@ export default function Editor({ github, group }: CodeProps) {
             )}
           </div>
         </div>
+
+        {outputOpen && (
+          <OutputPanel
+            state={runState}
+            onRunAgain={runAgain}
+            onStop={stopRunner}
+            onClear={clearOutput}
+            onClose={() => {
+              stopRunner();
+              setOutputOpen(false);
+            }}
+            onPreviewConsole={appendOutput}
+          />
+        )}
 
         <EditorStatusBar
           branch={currentBranch}
@@ -1479,7 +1564,6 @@ export default function Editor({ github, group }: CodeProps) {
       ) : (
         <div className="hidden h-full w-80 shrink-0 lg:block">
           <AiAssistantPanel
-            fileName={activeFileName}
             onGenerateReadme={handleGenerateReadme}
             generatingReadme={generatingReadme}
             onCollapse={() => setAiCollapsed(true)}
@@ -1491,7 +1575,6 @@ export default function Editor({ github, group }: CodeProps) {
           <div className="flex-1 bg-black/50" onClick={() => setAiOpen(false)} aria-hidden />
           <div className="w-[85vw] max-w-sm">
             <AiAssistantPanel
-              fileName={activeFileName}
               onClose={() => setAiOpen(false)}
               onGenerateReadme={handleGenerateReadme}
               generatingReadme={generatingReadme}

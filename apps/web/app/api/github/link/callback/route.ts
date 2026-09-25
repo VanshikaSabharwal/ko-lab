@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "../../../../lib/prisma";
-import { verifyLinkState, getBaseUrl } from "../../../../lib/githubLink";
+import { verifyLinkState, getBaseUrl, LINK_NONCE_COOKIE } from "../../../../lib/githubLink";
+import { getSessionUser } from "../../../../lib/apiAuth";
 import { sendCollaboratorInvite } from "../../../../lib/githubCollaborator";
 
 // Step 2: GitHub redirects back here. Verify the signed state, exchange the
@@ -12,13 +13,32 @@ export async function GET(req: NextRequest) {
   const state = searchParams.get("state");
   const base = getBaseUrl();
 
+  // Every outcome clears the nonce cookie, so a state can be used once
+  const finish = (res: NextResponse) => {
+    res.cookies.set(LINK_NONCE_COOKIE, "", { path: "/api/github/link", maxAge: 0 });
+    return res;
+  };
   const fail = (reason: string) =>
-    NextResponse.redirect(`${base}/profile?github=error&reason=${encodeURIComponent(reason)}`);
+    finish(
+      NextResponse.redirect(`${base}/profile?github=error&reason=${encodeURIComponent(reason)}`),
+    );
 
   if (!code || !state) return fail("missing_code");
 
-  const userId = verifyLinkState(state);
-  if (!userId) return fail("invalid_state");
+  const verified = verifyLinkState(state);
+  if (!verified) return fail("invalid_state");
+  const { userId } = verified;
+
+  // The signed state alone isn't enough: an attacker could start the flow on
+  // their own account and send the authorize link to a victim, whose GitHub
+  // account (and repo-scoped token) would then land on the attacker's
+  // account. Require that this browser started the flow and that the person
+  // signed in here is the one the state was signed for.
+  const cookieNonce = req.cookies.get(LINK_NONCE_COOKIE)?.value;
+  if (!cookieNonce || cookieNonce !== verified.nonce) return fail("state_mismatch");
+
+  const me = await getSessionUser();
+  if (!me || me.id !== userId) return fail("session_mismatch");
 
   // Exchange code → access token
   let accessToken: string;
@@ -88,5 +108,7 @@ export async function GET(req: NextRequest) {
   });
   await Promise.allSettled(pending.map((m) => sendCollaboratorInvite(m.groupId, userId)));
 
-  return NextResponse.redirect(`${base}/profile?github=linked&login=${encodeURIComponent(githubLogin)}`);
+  return finish(
+    NextResponse.redirect(`${base}/profile?github=linked&login=${encodeURIComponent(githubLogin)}`),
+  );
 }

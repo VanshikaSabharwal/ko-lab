@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "../../../lib/prisma";
 import { getSessionUser, unauthorized } from "../../../lib/apiAuth";
-import { uploadAvatar } from "../../../lib/s3";
-
-const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/webp"];
-const MAX_SIZE_BYTES = 5 * 1024 * 1024;
+import {
+  uploadAvatar,
+  ALLOWED_IMAGE_TYPES as ALLOWED_TYPES,
+  MAX_IMAGE_BYTES as MAX_SIZE_BYTES,
+} from "../../../lib/s3";
 
 export async function POST(req: NextRequest) {
   const me = await getSessionUser();

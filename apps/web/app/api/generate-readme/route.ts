@@ -2,39 +2,53 @@ import { NextResponse } from "next/server";
 import prisma from "../../lib/prisma";
 import { decrypt, extractRepoName } from "../../lib/encryption";
 import { getSessionUser, isGroupMember, unauthorized, forbidden } from "../../lib/apiAuth";
+import { safeContentsPath } from "../../lib/githubFiles";
 
+/** Enough of the tree to describe the project without flooding the prompt. */
+const MAX_TREE_PATHS = 400;
+
+/** Generated or vendored folders that say nothing about the project itself. */
+const SKIPPED_DIRS = new Set([
+  "node_modules", ".git", "dist", "build", ".next", "out", "coverage",
+  "vendor", "target", "__pycache__", ".venv", "venv", ".turbo", ".cache",
+]);
+
+/**
+ * Every file path in the repo, from one Git Trees request.
+ *
+ * This used to walk the Contents API one directory at a time with no limit,
+ * so a large repo made hundreds of sequential requests — timing out or
+ * burning through the owner's GitHub rate limit.
+ */
 async function fetchRepoFileTree(
   owner: string,
   repo: string,
   token: string,
-): Promise<{ path: string; name: string }[]> {
-  const files: { path: string; name: string }[] = [];
-
-  async function walk(dir: string = "") {
-    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${dir}`;
-    const res = await fetch(url, {
+): Promise<{ paths: string[]; truncated: boolean }> {
+  const res = await fetch(
+    `https://api.github.com/repos/${owner}/${repo}/git/trees/HEAD?recursive=1`,
+    {
       headers: {
         Authorization: `token ${token}`,
         Accept: "application/vnd.github.v3+json",
       },
-    });
+    },
+  );
+  if (!res.ok) return { paths: [], truncated: false };
 
-    if (!res.ok) return;
+  const data = await res.json();
+  if (!Array.isArray(data.tree)) return { paths: [], truncated: false };
 
-    const data = await res.json();
-    if (!Array.isArray(data)) return;
-
-    for (const item of data) {
-      if (item.type === "file") {
-        files.push({ path: item.path, name: item.name });
-      } else if (item.type === "dir") {
-        await walk(item.path);
-      }
-    }
+  const paths: string[] = [];
+  for (const item of data.tree) {
+    if (item.type !== "blob" || typeof item.path !== "string") continue;
+    if (item.path.split("/").some((seg: string) => SKIPPED_DIRS.has(seg))) continue;
+    paths.push(item.path);
   }
 
-  await walk();
-  return files;
+  // GitHub itself truncates very large trees; either way the list is partial
+  const truncated = Boolean(data.truncated) || paths.length > MAX_TREE_PATHS;
+  return { paths: paths.slice(0, MAX_TREE_PATHS), truncated };
 }
 
 async function fetchFileContent(
@@ -43,7 +57,9 @@ async function fetchFileContent(
   path: string,
   token: string,
 ): Promise<string> {
-  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+  const contentsPath = safeContentsPath(path);
+  if (!contentsPath) return "";
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${contentsPath}`;
   const res = await fetch(url, {
     headers: {
       Authorization: `token ${token}`,
@@ -101,11 +117,16 @@ export async function POST(req: Request) {
 
     const decryptedToken = decrypt(githubAccessToken);
 
-    const fileTree = await fetchRepoFileTree(ownerName, githubRepo, decryptedToken);
-    const filePaths = fileTree.map((f) => f.path);
+    const { paths: filePaths, truncated: treeTruncated } = await fetchRepoFileTree(
+      ownerName,
+      githubRepo,
+      decryptedToken,
+    );
 
     let projectContext = "## File Structure\n";
-    projectContext += filePaths.join("\n") + "\n\n";
+    projectContext += filePaths.join("\n") + "\n";
+    if (treeTruncated) projectContext += "... (more files not shown)\n";
+    projectContext += "\n";
 
     const importantFiles = [
       "package.json",
@@ -128,23 +149,21 @@ export async function POST(req: Request) {
       "composer.json",
     ];
 
-    for (const impFile of importantFiles) {
-      if (filePaths.includes(impFile)) {
-        const content = await fetchFileContent(
-          ownerName,
-          githubRepo,
-          impFile,
-          decryptedToken,
-        );
-        if (content) {
-          const truncated =
-            content.length > 3000
-              ? content.slice(0, 3000) + "\n... (truncated)"
-              : content;
-          projectContext += `### ${impFile}\n\`\`\`\n${truncated}\n\`\`\`\n\n`;
-        }
-      }
-    }
+    // At most one request per known root file, fetched together rather than
+    // one after another
+    const present = importantFiles.filter((f) => filePaths.includes(f));
+    const contents = await Promise.all(
+      present.map((f) => fetchFileContent(ownerName, githubRepo, f, decryptedToken)),
+    );
+    present.forEach((impFile, i) => {
+      const content = contents[i];
+      if (!content) return;
+      const truncated =
+        content.length > 3000
+          ? content.slice(0, 3000) + "\n... (truncated)"
+          : content;
+      projectContext += `### ${impFile}\n\`\`\`\n${truncated}\n\`\`\`\n\n`;
+    });
 
     const titleMatch = githubRepo.match(/[^/]+$/);
     const projectName = titleMatch ? titleMatch[0] : githubRepo;

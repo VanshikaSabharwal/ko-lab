@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { PrismaClient } from "@prisma/client";
+// The shared client: a route-local one that disconnected after every request
+// opened a fresh connection to the database each time, which is most of what
+// made creating a group slow.
+import prisma from "../../lib/prisma";
 import { encrypt } from "../../lib/encryption";
 import { getSessionUser, isGroupMember, unauthorized, forbidden } from "../../lib/apiAuth";
 import { revokeCollaborator } from "../../lib/githubCollaborator";
-
-const prisma = new PrismaClient();
 
 export async function POST(req: Request) {
   try {
@@ -47,38 +48,41 @@ export async function POST(req: Request) {
         { status: 400 },
       );
 
-    // Validate token by calling GitHub API before storing
-    try {
-      const testRes = await fetch("https://api.github.com/user", {
+    // The GitHub token check and the duplicate check don't depend on each
+    // other, so they run together rather than one after the other.
+    const [tokenCheck, groupExists] = await Promise.all([
+      fetch("https://api.github.com/user", {
         headers: {
           Authorization: `Bearer ${githubAccessToken}`,
           Accept: "application/vnd.github.v3+json",
         },
-      });
-      if (!testRes.ok) {
-        const err = await testRes.json().catch(() => ({}));
-        return NextResponse.json(
-          {
-            error: `GitHub token is invalid: ${err.message || testRes.statusText}. Try reconnecting your GitHub account or use a valid PAT.`,
-          },
-          { status: 401 },
-        );
-      }
-    } catch {
+      }).catch(() => null),
+      prisma.group.findFirst({
+        where: {
+          ownerId,
+          ownerName: githubOwnerName,
+          githubRepo,
+          groupName,
+        },
+        select: { id: true },
+      }),
+    ]);
+
+    if (!tokenCheck) {
       return NextResponse.json(
         { error: "Failed to verify GitHub token. Check your network." },
         { status: 502 },
       );
     }
-
-    const groupExists = await prisma.group.findFirst({
-      where: {
-        ownerId,
-        ownerName: githubOwnerName,
-        githubRepo,
-        groupName,
-      },
-    });
+    if (!tokenCheck.ok) {
+      const err = await tokenCheck.json().catch(() => ({}));
+      return NextResponse.json(
+        {
+          error: `GitHub token is invalid: ${err.message || tokenCheck.statusText}. Try reconnecting your GitHub account or use a valid PAT.`,
+        },
+        { status: 401 },
+      );
+    }
 
     if (groupExists) {
       return NextResponse.json(
@@ -108,6 +112,8 @@ export async function POST(req: Request) {
         sshKey: encryptedSshKey,
         ownerId,
       },
+      // Never send the stored token or SSH key back, even encrypted
+      select: { id: true, groupName: true, githubRepo: true },
     });
 
     return NextResponse.json(group, { status: 201 });
@@ -120,8 +126,6 @@ export async function POST(req: Request) {
       { error: err.message ?? "Internal Server Error" },
       { status: 500 },
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -157,6 +161,7 @@ export async function GET(req: Request) {
         ownerName: true,
         ownerId: true,
         liveUrl: true,
+        image: true,
         defaultBranch: true,
         createdAt: true,
         // A boolean flag is safe to expose; the key itself is not.
@@ -182,8 +187,6 @@ export async function GET(req: Request) {
       { error: "Failed to fetch group data" },
       { status: 500 },
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -229,8 +232,6 @@ export async function PATCH(req: Request) {
       { error: err.message ?? "Failed to rename group" },
       { status: 500 },
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
@@ -318,7 +319,5 @@ export async function DELETE(req: Request) {
       { error: err.message ?? "Failed to delete group" },
       { status: 500 },
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }

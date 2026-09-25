@@ -37,5 +37,7 @@ declare module "next-auth/jwt" {
     githubAccessToken?: string;
     accessToken: string;
     provider: string;
+    // When `picture` was last re-read from the database (ms epoch)
+    pictureCheckedAt?: number;
   }
 }

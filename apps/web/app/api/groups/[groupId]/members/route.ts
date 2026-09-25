@@ -24,6 +24,7 @@ export async function GET(_req: Request, { params }: { params: { groupId: string
     select: {
       ownerId: true,
       groupName: true,
+      image: true,
       owner: { select: { id: true, name: true, image: true, email: true } },
       members: {
         select: {
@@ -70,6 +71,7 @@ export async function GET(_req: Request, { params }: { params: { groupId: string
 
   return NextResponse.json({
     groupName: group.groupName,
+    groupImage: group.image,
     members: Array.from(byId.values()),
   });
 }

@@ -1,5 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// The ring ticket is signed with this; set before the route module loads.
+vi.hoisted(() => {
+  process.env.WS_AUTH_SECRET = "test-secret";
+});
+
 import { POST } from "../../../app/api/calls/initiate/route";
+
+/** Reads a ring ticket's payload (signature checks live in the socket server). */
+function ticketPayload(ticket: string) {
+  return JSON.parse(Buffer.from(ticket.split(".")[0]!, "base64url").toString());
+}
 
 vi.mock("next-auth", () => ({
   getServerSession: vi.fn(),
@@ -11,6 +22,9 @@ const mockPrisma = vi.hoisted(() => ({
   },
   group: {
     findUnique: vi.fn(),
+  },
+  friendship: {
+    findFirst: vi.fn(),
   },
 }));
 
@@ -60,6 +74,8 @@ beforeEach(() => {
     ownerId: "user-1",
     members: [{ userId: "user-1" }, { userId: "user-2" }],
   });
+  // 1:1 calls are friends-only; user-2 is user-1's friend unless a test says not.
+  mockPrisma.friendship.findFirst.mockResolvedValue({ id: "f1" });
   __spies.createRoom.mockResolvedValue({ name: "test-room" });
   __spies.deleteRoom.mockResolvedValue(undefined);
   mockFetch.mockResolvedValue({ ok: true });
@@ -130,13 +146,47 @@ describe("POST /api/calls/initiate", () => {
     expect(res.status).toBe(201);
   });
 
-  it("returns 201 for GROUP call and returns the roster to ring", async () => {
+  it("returns 201 for GROUP call with a ticket to ring the roster", async () => {
     vi.mocked(getServerSession).mockResolvedValue({ user: { id: "user-1" } });
     const res = await POST(makeRequest({ type: "GROUP", groupId: "group-1" }));
     const json = await res.json();
     expect(res.status).toBe(201);
+    const ticket = ticketPayload(json.ringTicket);
     // The caller is excluded — you don't ring yourself.
-    expect(json.inviteeIds).toEqual(["user-2"]);
+    expect(ticket).toMatchObject({
+      kind: "ring",
+      callerId: "user-1",
+      callId: "call-room-id",
+      groupId: "group-1",
+      invitees: ["user-2"],
+    });
+  });
+
+  it("returns 403 when the caller isn't in the group", async () => {
+    vi.mocked(getServerSession).mockResolvedValue({ user: { id: "outsider" } });
+    const res = await POST(makeRequest({ type: "GROUP", groupId: "group-1" }));
+    expect(res.status).toBe(403);
+    expect(mockPrisma.callRoom.create).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for a 1-on-1 call to someone who isn't a friend", async () => {
+    vi.mocked(getServerSession).mockResolvedValue({ user: { id: "user-1" } });
+    mockPrisma.friendship.findFirst.mockResolvedValue(null);
+    const res = await POST(makeRequest({ type: "VIDEO", targetId: "stranger" }));
+    const json = await res.json();
+    expect(res.status).toBe(403);
+    expect(json.error).toBe("You can only call people on your friend list");
+    expect(mockPrisma.callRoom.create).not.toHaveBeenCalled();
+  });
+
+  it("signs a 1-on-1 ticket that rings only the friend", async () => {
+    vi.mocked(getServerSession).mockResolvedValue({ user: { id: "user-1" } });
+    const res = await POST(makeRequest({ type: "VIDEO", targetId: "user-2" }));
+    const json = await res.json();
+    expect(ticketPayload(json.ringTicket)).toMatchObject({
+      groupId: null,
+      invitees: ["user-2"],
+    });
   });
 
   it("returns 404 when the group does not exist", async () => {

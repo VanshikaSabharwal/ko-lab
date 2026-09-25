@@ -1,39 +1,51 @@
 "use client";
 
-const COLORS = [
-  "bg-blue-600",
-  "bg-purple-600",
-  "bg-green-600",
-  "bg-amber-600",
-  "bg-rose-600",
-  "bg-cyan-600",
-];
-
-function colorFor(userId: string) {
-  let hash = 0;
-  for (let i = 0; i < userId.length; i++) hash = (hash * 31 + userId.charCodeAt(i)) >>> 0;
-  return COLORS[hash % COLORS.length];
-}
+import { useEffect, useState } from "react";
+import Avatar, { type AvatarUser } from "./Avatar";
 
 interface PresenceBarProps {
+  groupId: string;
   userIds: string[];
   currentUserId?: string;
 }
 
-export default function PresenceBar({ userIds, currentUserId }: PresenceBarProps) {
-  if (userIds.length === 0) return null;
+/**
+ * Who else is on this board right now. The viewer is left out — a lone avatar
+ * of yourself says nothing — and people show as their photo or initials; this
+ * used to print the first two characters of each user id ("CM").
+ */
+export default function PresenceBar({ groupId, userIds, currentUserId }: PresenceBarProps) {
+  const [members, setMembers] = useState<Map<string, AvatarUser>>(new Map());
+  const others = userIds.filter((id) => id !== currentUserId);
+  const hasOthers = others.length > 0;
+
+  // Names and photos come from the member list, loaded once someone else shows up
+  useEffect(() => {
+    if (!hasOthers || members.size > 0) return;
+    fetch(`/api/groups/${encodeURIComponent(groupId)}/members`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { members?: AvatarUser[] } | null) => {
+        if (data?.members) setMembers(new Map(data.members.map((m) => [m.id, m])));
+      })
+      .catch(() => {});
+  }, [groupId, hasOthers, members.size]);
+
+  if (!hasOthers) return null;
 
   return (
-    <div className="flex items-center -space-x-2">
-      {userIds.map((id) => (
-        <div
-          key={id}
-          title={id === currentUserId ? "You" : id}
-          className={`flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-[10px] dark:border-gray-900 font-semibold text-white ${colorFor(id)}`}
-        >
-          {id.slice(0, 2).toUpperCase()}
-        </div>
-      ))}
+    <div className="flex items-center -space-x-2" aria-label="Also on this board">
+      {others.map((id) => {
+        const user = members.get(id) ?? { id, name: null, image: null };
+        return (
+          <Avatar
+            key={id}
+            user={user}
+            size={28}
+            ring
+            title={`${user.name ?? "A group member"} is here`}
+          />
+        );
+      })}
     </div>
   );
 }

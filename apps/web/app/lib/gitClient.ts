@@ -8,6 +8,20 @@ import { decrypt, extractRepoName } from "./encryption";
 const SERVICE = process.env.GIT_SERVICE_URL || "";
 const SECRET = process.env.GIT_SERVICE_SECRET || "";
 
+/**
+ * fetch() to a service that isn't running fails with a bare "fetch failed",
+ * which reached the editor as an unexplained "Failed to load the files".
+ */
+async function serviceFetch(url: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch {
+    throw new Error(
+      "Can't reach the git service. Locally, start apps/web-socket (running `npm run dev` from the repo root starts it with the web app).",
+    );
+  }
+}
+
 async function call<T = unknown>(
   path: string,
   body: unknown,
@@ -17,7 +31,7 @@ async function call<T = unknown>(
       "GIT_SERVICE_URL and GIT_SERVICE_SECRET must be set to use the git workspace service",
     );
   }
-  const res = await fetch(`${SERVICE}${path}`, {
+  const res = await serviceFetch(`${SERVICE}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -130,7 +144,7 @@ export async function readFileRawBuffer(
     );
   }
   const params = new URLSearchParams({ groupId, branch, path: filePath });
-  const res = await fetch(`${SERVICE}/file?${params.toString()}`, {
+  const res = await serviceFetch(`${SERVICE}/file?${params.toString()}`, {
     headers: { Authorization: `Bearer ${SECRET}` },
   });
   if (!res.ok) {

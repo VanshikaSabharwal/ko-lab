@@ -172,3 +172,44 @@ describe("POST /api/file-chunk", () => {
     expect(res.status).toBe(403);
   });
 });
+
+/**
+ * filePath goes into a GitHub API URL that carries the owner's token. URLs
+ * resolve `..`, so an unchecked path escaped the group's repo to any repo or
+ * endpoint the token can reach.
+ */
+describe("POST /api/file-chunk path safety", () => {
+  it.each([
+    "../../../other-repo/contents/.env",
+    "src/../../../../user/emails",
+    "%2e%2e/%2e%2e/secret",
+    "a//b",
+    "./x",
+    "dir\\..\\x",
+  ])("rejects %s without calling GitHub", async (filePath) => {
+    const fetchSpy = vi.fn();
+    global.fetch = fetchSpy as unknown as typeof fetch;
+
+    const res = await POST(request({ groupId: "g1", filePath, start: 0 }));
+
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("encodes each segment so ? and # can't change the URL", async () => {
+    mockRange("x\n", 2);
+    await POST(request({ groupId: "g1", filePath: "docs/what?#.md", start: 0 }));
+
+    const url = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+    expect(url).toBe("https://api.github.com/repos/owner/repo/contents/docs/what%3F%23.md");
+  });
+
+  it("still accepts a normal nested path, including a literal %", async () => {
+    mockRange("x\n", 2);
+    const res = await POST(request({ groupId: "g1", filePath: "logs/100%.log", start: 0 }));
+
+    expect(res.status).toBe(200);
+    const url = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]![0] as string;
+    expect(url).toBe("https://api.github.com/repos/owner/repo/contents/logs/100%25.log");
+  });
+});

@@ -170,6 +170,10 @@ model Group {
   description String?
   coverImage  String?
 
+  // Square group photo (uploaded to S3/R2), shown wherever the group is listed.
+  // Null renders the gradient initial instead.
+  image String?
+
   owner           User?            @relation("OwnerGroups", fields: [ownerId], references: [id])
   members         GroupMember[]    @relation("GroupToMembers")
   groupMessage    GroupMessage[]   @relation("GroupMessage")
@@ -505,6 +509,34 @@ model ModifiedFiles {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, groupId, path], name: "userId_groupId_path")
+}
+
+// A temporary hosted copy of a static site from the editor ("Make it live").
+// The files are a snapshot in object storage under previews/{id}/, taken from
+// the branch plus the author's drafts. One per user per group; expired rows
+// are swept (with their objects) the next time anyone deploys.
+model LivePreview {
+  id      String @id @default(cuid())
+  groupId String
+  userId  String
+  branch  String
+  // Folder served as the site root: "" for the repo root, or e.g. "dist".
+  rootDir String
+
+  // Private link: only the author, signed in, can open its pages.
+  token     String   @unique
+  expiresAt DateTime
+
+  // Optional public link with its own lifetime. Keeps the snapshot alive
+  // after the private link expires.
+  shareToken     String?   @unique
+  shareExpiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([groupId, userId])
+  @@index([expiresAt])
 }
 
 model Change {

@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import Cookies from "js-cookie";
 import { Phone, Video } from "lucide-react";
 import { useCall } from "../../components/call/CallProvider";
+import UserAvatar from "../../components/UserAvatar";
 import { fetchWsToken } from "../../lib/wsAuth";
 
 const EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
@@ -57,7 +58,11 @@ const ChatWithPhone: React.FC<ChatWithPhoneProps> = ({ phone }) => {
   const [userId, setUserId] = useState(""); // my phone number
   const [guestData, setGuestData] = useState<GuestData | null>(null);
   const [recipientName, setRecipientName] = useState<string>("");
+  const [recipientImage, setRecipientImage] = useState<string | null>(null);
   const [recipientId, setRecipientId] = useState<string>("");
+  // The socket handler is created once, so it reads the latest id from here
+  const recipientIdRef = useRef("");
+  recipientIdRef.current = recipientId;
   const [newMsgDividerIndex, setNewMsgDividerIndex] = useState<number | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -147,6 +152,7 @@ const ChatWithPhone: React.FC<ChatWithPhoneProps> = ({ phone }) => {
         const data = await res.json();
         setRecipientName(res.ok && data.name ? data.name : phone);
         setRecipientId(res.ok && data.id ? data.id : "");
+        setRecipientImage(res.ok ? data.image ?? null : null);
       } catch {
         setRecipientName(phone);
       }
@@ -265,11 +271,22 @@ const ChatWithPhone: React.FC<ChatWithPhoneProps> = ({ phone }) => {
             return;
           }
 
-          // Incoming message from the other person
+          // Incoming message from the other person. chatId is chosen by the
+          // sender, so it alone can't prove who wrote this — anyone could make
+          // a message appear in this conversation. senderId is stamped by the
+          // socket server from the sender's signed token, so it can.
           const incomingChatId = chatId || [userId, phone].sort().join("-");
-          if (message.chatId === incomingChatId) {
+          if (
+            message.chatId === incomingChatId &&
+            recipientIdRef.current &&
+            message.senderId === recipientIdRef.current
+          ) {
             if (!message.timestamp) message.timestamp = Date.now();
-            setMessages((prev) => [...prev, { ...message, status: "read" as MessageStatus }]);
+            // Stored and optimistic messages identify senders by phone
+            setMessages((prev) => [
+              ...prev,
+              { ...message, senderId: phone, recipientId: userId, status: "read" as MessageStatus },
+            ]);
             setNewMsgDividerIndex(null);
             sendBrowserNotification(recipientName || phone, message.content);
             // Send read receipt
@@ -328,9 +345,19 @@ const ChatWithPhone: React.FC<ChatWithPhoneProps> = ({ phone }) => {
     setMessages((prev) => [...prev, optimisticMsg]);
     setNewMessage("");
 
-    // Send via WebSocket for real-time delivery
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(optimisticMsg));
+    // Send via WebSocket for real-time delivery. The socket server addresses
+    // people by user id, not phone — sending the phone meant every live DM
+    // came back "Recipient not connected". The DB save below still runs if
+    // the id hasn't loaded yet.
+    if (wsRef.current?.readyState === WebSocket.OPEN && recipientIdRef.current) {
+      wsRef.current.send(
+        JSON.stringify({
+          chatId,
+          recipientId: recipientIdRef.current,
+          content: optimisticMsg.content,
+          timestamp,
+        }),
+      );
     }
 
     // Always save to DB (ensures offline recipient gets it)
@@ -381,9 +408,7 @@ const ChatWithPhone: React.FC<ChatWithPhoneProps> = ({ phone }) => {
       {/* Header */}
       <div className="px-4 py-3 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between relative">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-white text-sm font-bold">
-            {(recipientName || phone)[0]?.toUpperCase()}
-          </div>
+          <UserAvatar src={recipientImage} name={recipientName || phone} size={36} />
           <div>
             <p className="text-sm font-semibold text-gray-900 dark:text-white">{recipientName || phone}</p>
             <p className="text-xs text-gray-400">{phone}</p>
@@ -488,7 +513,10 @@ const ChatWithPhone: React.FC<ChatWithPhoneProps> = ({ phone }) => {
                   </div>
                 )}
 
-                <div className={`flex mb-2 ${isOwn ? "justify-end" : "justify-start"}`}>
+                <div className={`flex items-end gap-2 mb-2 ${isOwn ? "justify-end" : "justify-start"}`}>
+                  {!isOwn && (
+                    <UserAvatar src={recipientImage} name={recipientName || phone} size={28} />
+                  )}
                   <div className="relative max-w-xs sm:max-w-sm">
                     {/* Bubble */}
                     <div
