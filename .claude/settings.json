@@ -21,7 +21,9 @@
       "Bash(grep -n \"RunLocallyMenu\\\\|liveUrl\\\\|LiveUrl\\\\|urlInput\\\\|editingUrl\\\\|SettingsPanel\\\\|useIdeSettings\\\\|Globe\\\\|ExternalLink\\\\|Settings,\\\\|  Check,\\\\|<Check\\\\|<X \\\\|X,\\\\|repoPaths\\\\|Use Run locally\\\\|contentCache.current.set\\(\\\\`\\\\${currentBranch}:\\\\${filePath}\\\\`\" Editor.tsx)",
       "Bash(ps -eo pid,lstart,args)",
       "Bash(curl -sI \"http://localhost:3000/_next/static/chunks/app_f9438b._.js\")",
-      "Bash(grep -rhoE 'https://[^\"`'\"'\"' ]+' index.js)"
+      "Bash(grep -rhoE 'https://[^\"`'\"'\"' ]+' index.js)",
+      "Bash(curl -s -m 5 localhost:8080/health)",
+      "Bash(grep -v \"^$\")"
     ]
   }
 }

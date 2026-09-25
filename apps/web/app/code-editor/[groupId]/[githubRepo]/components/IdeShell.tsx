@@ -4,7 +4,7 @@ import React from "react";
 import Link from "next/link";
 import { signOut } from "next-auth/react";
 import {
-  Folder, Users, Settings, Menu, Search, LogOut, Plus, X, Sparkles, Trash2, SquareTerminal,
+  Folder, Users, Settings, Menu, Search, LogOut, Plus, X, Sparkles, Trash2, SquareTerminal, FilePlus,
 } from "lucide-react";
 import { cn } from "../../../../lib/utils";
 
@@ -25,6 +25,8 @@ interface IdeShellProps {
   onMenuOpenChange: (open: boolean) => void;
   /** Staged deletions expiring within a day; shown as a badge on Trash. */
   trashWarningCount?: number;
+  /** Starts creating a file. Omitted for people without code access. */
+  onNewFile?: () => void;
 }
 
 const NAV: { key: IdeSection; label: string; short: string; icon: typeof Folder }[] = [
@@ -38,7 +40,7 @@ const NAV: { key: IdeSection; label: string; short: string; icon: typeof Folder 
 export default function IdeShell({
   repo, section, onSectionChange, search, onSearchChange,
   explorer, children, onOpenAi, menuOpen, onMenuOpenChange,
-  trashWarningCount = 0,
+  trashWarningCount = 0, onNewFile,
 }: IdeShellProps) {
   return (
     <div className="flex h-[100dvh] flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-white">
@@ -145,9 +147,21 @@ export default function IdeShell({
             ))}
           </nav>
 
-          <p className="mt-4 px-4 pb-1 text-[10px] font-semibold uppercase tracking-widest text-gray-400">
-            Project explorer
-          </p>
+          <div className="mt-4 flex items-center justify-between pb-1 pl-4 pr-2">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
+              Project explorer
+            </p>
+            {onNewFile && (
+              <button
+                onClick={onNewFile}
+                aria-label="New file"
+                title="New file"
+                className="rounded p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-700 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+              >
+                <FilePlus size={14} />
+              </button>
+            )}
+          </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">{explorer}</div>
 
           <div className="border-t border-gray-200 px-2 py-2 dark:border-gray-800">

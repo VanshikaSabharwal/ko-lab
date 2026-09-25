@@ -311,11 +311,15 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
               <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${isConnected ? "bg-green-400" : "bg-yellow-400 animate-pulse"}`} title={isConnected ? "Connected" : "Reconnecting..."} />
             </div>
             <h2 className="text-sm text-center mt-1">Group ID: {group}</h2>
-            <Link href={`/code-editor/${group}/${groupName}`}>
-              <button className="mt-2 bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition duration-300">
-                Code Editor
-              </button>
-            </Link>
+            {/* Full page load, not <Link>: the terminal needs the editor
+                route's cross-origin isolation headers */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a
+              href={`/code-editor/${group}/${groupName}`}
+              className="mt-2 inline-block bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 transition duration-300"
+            >
+              Code Editor
+            </a>
           </div>
           <div
             className="flex-1 overflow-y-auto p-4"

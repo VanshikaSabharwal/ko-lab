@@ -80,6 +80,16 @@ export function resolveEditorTheme(themeId: string, siteIsDark: boolean): Editor
   return EDITOR_THEMES.find((t) => t.id === (siteIsDark ? "one-dark" : "github-light"))!;
 }
 
+/** Font size as an editor extension, so it scales the gutter and text together. */
+export function fontSizeTheme(size: number): Extension {
+  return EditorView.theme({
+    "&": { fontSize: `${size}px` },
+    ".cm-gutters": { fontSize: `${size}px` },
+  });
+}
+
+export const DEFAULT_IDE_SETTINGS = DEFAULTS;
+
 export function useIdeSettings(siteIsDark: boolean) {
   const [settings, setSettings] = useState<IdeSettings>(DEFAULTS);
 
@@ -101,15 +111,7 @@ export function useIdeSettings(siteIsDark: boolean) {
 
   const theme = resolveEditorTheme(settings.themeId, siteIsDark);
 
-  // Font size as an editor extension, so it scales the gutter and text together
-  const fontSizeExtension = useMemo(
-    () =>
-      EditorView.theme({
-        "&": { fontSize: `${settings.fontSize}px` },
-        ".cm-gutters": { fontSize: `${settings.fontSize}px` },
-      }),
-    [settings.fontSize],
-  );
+  const fontSizeExtension = useMemo(() => fontSizeTheme(settings.fontSize), [settings.fontSize]);
 
   return {
     settings,
@@ -118,5 +120,7 @@ export function useIdeSettings(siteIsDark: boolean) {
     setFontSize: (fontSize: number) => update({ fontSize }),
     setThemeId: (themeId: string) => update({ themeId }),
     reset: () => update(DEFAULTS),
+    /** Apply and store several settings at once (the Settings panel's Save). */
+    save: (next: IdeSettings) => update(next),
   };
 }

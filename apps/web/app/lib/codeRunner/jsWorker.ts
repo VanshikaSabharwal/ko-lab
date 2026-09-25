@@ -24,7 +24,7 @@ function formatValue(value: unknown, depth = 0, seen = new WeakSet<object>()): s
   if (typeof value === "function") return `[Function: ${value.name || "anonymous"}]`;
   if (typeof value !== "object") return String(value);
 
-  if (value instanceof Error) return cleanStack(value.stack || `${value.name}: ${value.message}`);
+  if (value instanceof Error) return formatError(value);
   if (seen.has(value)) return "[Circular]";
   if (depth > 3) return Array.isArray(value) ? "[Array]" : "[Object]";
   seen.add(value);
@@ -55,23 +55,32 @@ let userFiles: Record<string, string> = {};
  * Keep only frames in the user's files, with line numbers corrected: the
  * Function constructor wraps each module in two extra header lines.
  */
-function cleanStack(stack: string): string {
-  const lines = stack.split("\n");
-  const kept: string[] = [];
-  for (const line of lines) {
-    const frame = /^\s+at\s/.test(line);
-    if (!frame) {
-      kept.push(line);
-      continue;
-    }
-    const fixed = line.replace(
-      /([\w./@-]+\.(?:[mc]?[jt]sx?|json)):(\d+):(\d+)/g,
-      (match, path: string, lineNo: string, col: string) =>
-        path in userFiles ? `${path}:${Number(lineNo) - 2}:${col}` : match,
-    );
-    if (Object.keys(userFiles).some((p) => fixed.includes(`${p}:`))) kept.push(fixed);
+// A stack frame in either engine's format:
+//   V8 (Chrome, Edge):         "    at fn (index.js:3:5)"
+//   SpiderMonkey/JSC (Firefox, Safari): "fn@index.js:3:5"
+const FRAME = /^\s+at\s|^[^\s@]*@\S+:\d+:\d+$/;
+const LOCATION = /([\w./-]+\.(?:[mc]?[jt]sx?|json)):(\d+):(\d+)/;
+
+/**
+ * "Name: message" followed only by frames in the user's own files, with line
+ * numbers mapped back past the wrapper, in one format whatever the browser.
+ * Firefox's error.stack has no message line at all, so the header is always
+ * built from the error itself rather than taken from the stack.
+ */
+function formatError(error: Error): string {
+  const header = error.message ? `${error.name}: ${error.message}` : error.name;
+  const frames: string[] = [];
+  for (const line of (error.stack || "").split("\n")) {
+    if (!FRAME.test(line)) continue;
+    const loc = LOCATION.exec(line);
+    if (!loc || !(loc[1]! in userFiles)) continue;
+    const where = `${loc[1]}:${Number(loc[2]) - 2}:${loc[3]}`;
+    const fn = line.trim().startsWith("at ")
+      ? /^\s*at\s+(\S+)\s+\(/.exec(line)?.[1]
+      : line.split("@")[0];
+    frames.push(fn && fn !== "anonymous" ? `    at ${fn} (${where})` : `    at ${where}`);
   }
-  return kept.join("\n");
+  return [header, ...frames].join("\n");
 }
 
 // ── Program lifetime ─────────────────────────────────────────────────────────

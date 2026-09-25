@@ -1,16 +1,21 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { javascript } from "@codemirror/lang-javascript";
+import { useTheme } from "next-themes";
+import toast from "react-hot-toast";
 import { Check, Minus, Monitor, Plus, RotateCcw } from "lucide-react";
 import { cn } from "../../../../lib/utils";
 import {
+  DEFAULT_IDE_SETTINGS,
   EDITOR_THEMES,
   FONT_SIZE_DEFAULT,
   FONT_SIZE_MAX,
   FONT_SIZE_MIN,
   SYSTEM_THEME,
+  fontSizeTheme,
+  resolveEditorTheme,
   type EditorThemeOption,
   type useIdeSettings,
 } from "../lib/ideSettings";
@@ -87,8 +92,40 @@ export default function SettingsPanel({
   autoUpdateLiveSite,
   onAutoUpdateLiveSiteChange,
 }: SettingsPanelProps) {
-  const { settings, theme, fontSizeExtension, setFontSize, setThemeId, reset } = ide;
-  const size = settings.fontSize;
+  // Edits collect in a draft: the Preview below shows them straight away, but
+  // the editor and the stored settings only change on Save.
+  const saved = { ...ide.settings, autoUpdateLiveSite };
+  const [draft, setDraft] = useState(saved);
+  const dirty =
+    draft.fontSize !== saved.fontSize ||
+    draft.themeId !== saved.themeId ||
+    draft.autoUpdateLiveSite !== saved.autoUpdateLiveSite;
+
+  // Stored settings load after mount; pick them up while nothing is being edited
+  useEffect(() => {
+    if (!dirty) setDraft(saved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ide.settings.fontSize, ide.settings.themeId, autoUpdateLiveSite]);
+
+  const { resolvedTheme } = useTheme();
+  const theme = resolveEditorTheme(draft.themeId, resolvedTheme !== "light");
+  const fontSizeExtension = useMemo(() => fontSizeTheme(draft.fontSize), [draft.fontSize]);
+
+  const size = draft.fontSize;
+  const setFontSize = (n: number) =>
+    setDraft((d) => ({ ...d, fontSize: Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, n)) }));
+  const setThemeId = (themeId: string) => setDraft((d) => ({ ...d, themeId }));
+  const reset = () => setDraft((d) => ({ ...d, ...DEFAULT_IDE_SETTINGS }));
+  const autoUpdate = draft.autoUpdateLiveSite;
+
+  const save = () => {
+    ide.save({ fontSize: draft.fontSize, themeId: draft.themeId });
+    if (draft.autoUpdateLiveSite !== autoUpdateLiveSite) {
+      onAutoUpdateLiveSiteChange(draft.autoUpdateLiveSite);
+    }
+    toast.success("Settings saved");
+  };
+  const discard = () => setDraft(saved);
 
   const stepButton =
     "flex h-8 w-8 items-center justify-center rounded-md border border-gray-200 text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:hover:bg-transparent dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800";
@@ -99,7 +136,9 @@ export default function SettingsPanel({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Editor settings</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Saved in this browser.</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Try options in the preview, then save. Saved in this browser.
+            </p>
           </div>
           <button
             type="button"
@@ -166,7 +205,7 @@ export default function SettingsPanel({
           <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">Colours used for code in the editor.</p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             <ThemeCard
-              selected={settings.themeId === SYSTEM_THEME}
+              selected={draft.themeId === SYSTEM_THEME}
               label="Match site theme"
               sublabel={`Now: ${theme.label}`}
               icon={<Monitor size={16} className="text-gray-500" />}
@@ -175,7 +214,7 @@ export default function SettingsPanel({
             {EDITOR_THEMES.map((t) => (
               <ThemeCard
                 key={t.id}
-                selected={settings.themeId === t.id}
+                selected={draft.themeId === t.id}
                 label={t.label}
                 sublabel={t.dark ? "Dark" : "Light"}
                 swatch={t.swatch}
@@ -201,17 +240,17 @@ export default function SettingsPanel({
             <button
               type="button"
               role="switch"
-              aria-checked={autoUpdateLiveSite}
-              onClick={() => onAutoUpdateLiveSiteChange(!autoUpdateLiveSite)}
+              aria-checked={autoUpdate}
+              onClick={() => setDraft((d) => ({ ...d, autoUpdateLiveSite: !d.autoUpdateLiveSite }))}
               className={cn(
                 "relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors",
-                autoUpdateLiveSite ? "bg-blue-500" : "bg-gray-300 dark:bg-gray-600",
+                autoUpdate ? "bg-blue-500" : "bg-gray-300 dark:bg-gray-600",
               )}
             >
               <span
                 className={cn(
                   "absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
-                  autoUpdateLiveSite && "translate-x-4",
+                  autoUpdate && "translate-x-4",
                 )}
               />
             </button>
@@ -231,6 +270,32 @@ export default function SettingsPanel({
             />
           </div>
         </section>
+      </div>
+
+      {/* Stays in view while scrolling, so Save is always reachable */}
+      <div className="sticky bottom-0 border-t border-gray-200 bg-white/95 backdrop-blur dark:border-gray-800 dark:bg-gray-950/95">
+        <div className="mx-auto flex max-w-3xl items-center justify-end gap-3 px-6 py-3">
+          <span className="mr-auto text-xs text-gray-500 dark:text-gray-400">
+            {dirty ? "You have unsaved changes" : "All changes saved"}
+          </span>
+          <button
+            type="button"
+            onClick={discard}
+            disabled={!dirty}
+            className="rounded-md px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-40 disabled:hover:bg-transparent dark:text-gray-300 dark:hover:bg-gray-800"
+          >
+            Discard
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            disabled={!dirty}
+            className="flex items-center gap-1.5 rounded-md bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-40 disabled:hover:bg-blue-600"
+          >
+            <Check size={14} />
+            Save settings
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -833,6 +833,50 @@ export default function Editor({ github, group }: CodeProps) {
     router.push(`/confirm-changes/${group}`);
   };
 
+  // ── New file ──────────────────────────────────────────────────────────────
+  // Null when closed; otherwise the path being typed in the explorer.
+  const [newFilePath, setNewFilePath] = useState<string | null>(null);
+
+  /** Why a path can't be created, or null when it's fine. */
+  const newFileError = (raw: string): string | null => {
+    const path = raw.trim().replace(/^\/+/, "");
+    if (!path) return "Enter a file name";
+    if (path.endsWith("/")) return "Add a file name after the folder";
+    if (path.split("/").some((part) => !part || part === "." || part === ".."))
+      return "That path isn't allowed";
+    if (/[\\:*?"<>|\0]/.test(path)) return "Remove special characters from the name";
+    if (files.some((f) => f.path === path)) return "A file with that name already exists";
+    return null;
+  };
+
+  /**
+   * Adds an empty file that exists only in this editor until it's saved. It
+   * goes through the same draft → change request path as any edit, the way a
+   * generated README does, so nothing reaches the repo unreviewed.
+   */
+  const createFile = (raw: string) => {
+    const error = newFileError(raw);
+    if (error) {
+      toast.error(error, { id: "new-file" });
+      return;
+    }
+    const path = raw.trim().replace(/^\/+/, "");
+    const file: CodeFile = {
+      name: path.split("/").pop()!,
+      path,
+      sha: "",
+      size: 0,
+      url: "",
+      content: "",
+      _generated: true,
+    };
+    setFiles((prev) => [...prev, file]);
+    setNewFilePath(null);
+    setFileSearch("");
+    expandToFile(path);
+    void loadFileContent(file);
+  };
+
   const handleGenerateReadme = async () => {
     setGeneratingReadme(true);
     try {
@@ -1213,19 +1257,62 @@ export default function Editor({ github, group }: CodeProps) {
       onMenuOpenChange={setMenuOpen}
       trashWarningCount={expiringSoon.length}
       onOpenAi={() => setAiOpen(true)}
+      onNewFile={hasCodeAccess ? () => setNewFilePath((p) => p ?? "") : undefined}
       explorer={
-        loading ? (
+        <>
+        {newFilePath !== null && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              createFile(newFilePath);
+            }}
+            className="px-2 pb-2"
+          >
+            <input
+              autoFocus
+              value={newFilePath}
+              onChange={(e) => setNewFilePath(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setNewFilePath(null);
+              }}
+              onBlur={() => {
+                // Clicking away with nothing typed just closes it
+                if (!newFilePath.trim()) setNewFilePath(null);
+              }}
+              placeholder="e.g. src/utils.js"
+              aria-label="New file name"
+              className="w-full rounded-md border border-blue-500 bg-white px-2 py-1.5 text-sm text-gray-900 outline-none dark:bg-gray-900 dark:text-white"
+            />
+            <p className="mt-1 px-0.5 text-[11px] text-gray-500">
+              {newFilePath.trim() && newFileError(newFilePath)
+                ? newFileError(newFilePath)
+                : "Enter to create · Esc to cancel · use / for folders"}
+            </p>
+          </form>
+        )}
+        {loading ? (
           <div className="flex items-center gap-2 px-3 py-6 text-sm text-gray-500">
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-transparent" />
             Loading files…
           </div>
         ) : fileTree.length === 0 ? (
-          <p className="px-3 py-6 text-center text-sm text-gray-500">
-            {fileSearch ? "No matching files" : "No files found"}
-          </p>
+          newFilePath === null && (
+            <div className="px-3 py-6 text-center text-sm text-gray-500">
+              <p>{fileSearch ? "No matching files" : "No files found"}</p>
+              {!fileSearch && hasCodeAccess && (
+                <button
+                  onClick={() => setNewFilePath("")}
+                  className="mt-2 text-blue-600 hover:underline dark:text-blue-400"
+                >
+                  Create a file
+                </button>
+              )}
+            </div>
+          )
         ) : (
           <>{fileTree.map((node) => renderTreeNode(node, 0))}</>
-        )
+        )}
+        </>
       }
     >
       {/* Main Content Area */}

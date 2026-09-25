@@ -584,8 +584,13 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
             <div className={`absolute right-0 top-10 w-56 bg-white dark:bg-gray-900 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 z-50 overflow-hidden transition-all duration-200 origin-top-right ${
               menuOpen ? "opacity-100 scale-100" : "opacity-0 scale-95 pointer-events-none"
             }`}>
-              {/* Code Editor */}
-              <Link
+              {/* Code Editor. A plain link on purpose: the editor's terminal
+                  needs the cross-origin isolation headers its route sends,
+                  and those only apply to a full page load. Next's <Link>
+                  swaps pages in place, which left the terminal asking for a
+                  reload. */}
+              {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+              <a
                 href={`/code-editor/${group}/${githubRepo}`}
                 onClick={() => setMenuOpen(false)}
                 className="w-full flex items-center gap-2 px-4 py-3 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
@@ -594,7 +599,7 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
                   <path strokeLinecap="round" strokeLinejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
                 </svg>
                 Code Editor
-              </Link>
+              </a>
 
               {/* Group Photo — owner only */}
               {isOwner && (
