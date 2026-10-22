@@ -17,6 +17,23 @@ setInterval(
   5 * 60 * 1000,
 );
 
+// Requests one address may make to /api per minute. The browser tests drive
+// dozens of pages from a single address and raise this for their own server;
+// anything unset or invalid falls back to the default.
+const DEFAULT_API_LIMIT = 120;
+const configuredApiLimit = Number(process.env.API_RATE_LIMIT_PER_MINUTE);
+const API_LIMIT =
+  Number.isFinite(configuredApiLimit) && configuredApiLimit > 0
+    ? configuredApiLimit
+    : DEFAULT_API_LIMIT;
+
+const UPLOAD_ROUTES = [
+  /^\/api\/modified-files$/,
+  /^\/api\/profile\/avatar$/,
+  /^\/api\/groups\/[^/]+\/image$/,
+  /^\/api\/workspace\/[^/]+\/design-image$/,
+];
+
 function getClientIP(request: NextRequest): string {
   const forwarded = request.headers.get("x-forwarded-for");
   const real = request.headers.get("x-real-ip");
@@ -92,15 +109,18 @@ export function middleware(request: NextRequest) {
 
   // ── General API routes — 120 requests per IP per minute ──────────────────
   if (pathname.startsWith("/api/")) {
-    if (isRateLimited(`api:${ip}`, 120, 60_000)) {
+    if (isRateLimited(`api:${ip}`, API_LIMIT, 60_000)) {
       return rateLimitResponse(60);
     }
   }
 
   // ── Block requests with oversized bodies (basic DDoS mitigation) ──────────
+  // Routes that take a file get more room: the editor saves text up to 5 MB and
+  // images are capped at 5 MB by the routes themselves, so 1 MB here rejected
+  // uploads those routes are meant to accept.
   const contentLength = request.headers.get("content-length");
-  if (contentLength && parseInt(contentLength) > 1_000_000) {
-    // 1MB max
+  const maxBody = UPLOAD_ROUTES.some((r) => r.test(pathname)) ? 8_000_000 : 1_000_000;
+  if (contentLength && parseInt(contentLength) > maxBody) {
     return new NextResponse("Payload too large", { status: 413 });
   }
 

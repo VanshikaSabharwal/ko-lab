@@ -8,6 +8,5 @@ export default function CodePage({
 }) {
   const { githubRepo } = params;
   const { groupId } = params;
-  console.log(params);
   return <Editor github={githubRepo} group={groupId} />;
 }

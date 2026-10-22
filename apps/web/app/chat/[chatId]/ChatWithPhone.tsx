@@ -176,12 +176,10 @@ const ChatWithPhone: React.FC<ChatWithPhoneProps> = ({ phone }) => {
 
     const loadMessages = async () => {
       try {
-        console.log("[LOAD] fetching messages, senderPhone:", userId, "recipientPhone:", phone);
         const res = await fetch(`/api/direct-message?senderPhone=${userId}&recipientPhone=${phone}`);
         const data = await res.json();
-        console.log("[LOAD] response status:", res.status, "data:", data);
         if (!res.ok || !data.messages) {
-          console.error("[LOAD] failed:", data);
+          console.error("Loading messages failed:", res.status);
           return;
         }
 
@@ -362,14 +360,12 @@ const ChatWithPhone: React.FC<ChatWithPhoneProps> = ({ phone }) => {
 
     // Always save to DB (ensures offline recipient gets it)
     try {
-      console.log("[SAVE] senderPhone:", userId, "recipientPhone:", phone, "content:", newMessage);
       const res = await fetch("/api/direct-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ senderPhone: userId, recipientPhone: phone, content: newMessage }),
       });
       const data = await res.json();
-      console.log("[SAVE] response status:", res.status, "data:", data);
       if (!res.ok) throw new Error(data.error || "Failed to save");
       setMessages((prev) =>
         prev.map((m) =>

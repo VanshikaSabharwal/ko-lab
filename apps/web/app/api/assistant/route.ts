@@ -3,7 +3,7 @@ import prisma from "../../lib/prisma";
 import { authOptions } from "../../lib/auth";
 import { Groq } from "groq-sdk";
 import {
-  CREDITS_PER_CONVERSATION,
+  DAILY_CREDITS,
   type AssistantCredits,
 } from "../../lib/assistantCredits";
 
@@ -308,40 +308,43 @@ function json(data: unknown, status = 200) {
 
 type SpendResult =
   | { ok: true; credits: AssistantCredits }
-  | { ok: false; reason: "not_found" }
-  | { ok: false; reason: "exhausted"; credits: AssistantCredits };
+  | { ok: false; credits: AssistantCredits };
+
+/** The allowance resets when the UTC date changes. */
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function creditsFor(userId: string, day: string): Promise<AssistantCredits> {
+  const row = await prisma.assistantDailyUsage.findUnique({
+    where: { userId_day: { userId, day } },
+    select: { used: true },
+  });
+  const used = row?.used ?? 0;
+  return { total: DAILY_CREDITS, used, remaining: Math.max(0, DAILY_CREDITS - used) };
+}
 
 /**
- * Spends one credit on the conversation. The guard lives in the UPDATE's
+ * Spends one of the user's credits for today. The guard lives in the UPDATE's
  * WHERE clause, so two requests racing for the last credit can't both win.
  */
-async function spendCredit(conversationId: string, userId: string): Promise<SpendResult> {
-  const conversation = await prisma.assistantConversation.findFirst({
-    where: { id: conversationId, userId },
-    select: { creditsTotal: true },
+async function spendCredit(userId: string, day: string): Promise<SpendResult> {
+  await prisma.assistantDailyUsage.createMany({
+    data: [{ userId, day }],
+    skipDuplicates: true,
   });
-  if (!conversation) return { ok: false, reason: "not_found" };
-
-  const { count } = await prisma.assistantConversation.updateMany({
-    where: {
-      id: conversationId,
-      userId,
-      creditsUsed: { lt: conversation.creditsTotal },
-    },
-    data: { creditsUsed: { increment: 1 } },
+  const { count } = await prisma.assistantDailyUsage.updateMany({
+    where: { userId, day, used: { lt: DAILY_CREDITS } },
+    data: { used: { increment: 1 } },
   });
+  return { ok: count > 0, credits: await creditsFor(userId, day) };
+}
 
-  const after = await prisma.assistantConversation.findUniqueOrThrow({
-    where: { id: conversationId },
-    select: { creditsTotal: true, creditsUsed: true },
-  });
-  const credits = {
-    total: after.creditsTotal,
-    used: after.creditsUsed,
-    remaining: Math.max(0, after.creditsTotal - after.creditsUsed),
-  };
-
-  return count === 0 ? { ok: false, reason: "exhausted", credits } : { ok: true, credits };
+/** Today's allowance, so the chat can show it before the first message. */
+export async function GET() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.id) return json({ error: "Unauthorized" }, 401);
+  return json({ credits: await creditsFor(session.user.id, today()) });
 }
 
 async function runAssistant(
@@ -466,33 +469,38 @@ export async function POST(request: Request) {
     }
 
     // A conversation is created on its first message; later messages must
-    // name one the user owns.
+    // name one the user owns. Credits are counted per user per day, so a new
+    // conversation doesn't come with a new allowance.
     let conversationId: string;
     if (body.conversationId == null) {
       const created = await prisma.assistantConversation.create({
-        data: { userId, creditsTotal: CREDITS_PER_CONVERSATION },
+        data: { userId, creditsTotal: DAILY_CREDITS },
         select: { id: true },
       });
       conversationId = created.id;
     } else if (typeof body.conversationId === "string") {
-      conversationId = body.conversationId;
+      const owned = await prisma.assistantConversation.findFirst({
+        where: { id: body.conversationId, userId },
+        select: { id: true },
+      });
+      if (!owned) return json({ error: "Conversation not found" }, 404);
+      conversationId = owned.id;
     } else {
       return json({ error: "Invalid conversationId" }, 400);
     }
 
-    const spent = await spendCredit(conversationId, userId);
+    const day = today();
+    const spent = await spendCredit(userId, day);
     if (!spent.ok) {
-      return spent.reason === "not_found"
-        ? json({ error: "Conversation not found" }, 404)
-        : json(
-            {
-              error: "This conversation has used all its credits. Start a new chat to keep going.",
-              code: "OUT_OF_CREDITS",
-              conversationId,
-              credits: spent.credits,
-            },
-            402
-          );
+      return json(
+        {
+          error: `You've used all ${DAILY_CREDITS} of today's credits. They reset at midnight UTC.`,
+          code: "OUT_OF_CREDITS",
+          conversationId,
+          credits: spent.credits,
+        },
+        402
+      );
     }
 
     let result: { text: string; finishReason: string | undefined };
@@ -500,9 +508,9 @@ export async function POST(request: Request) {
       result = await runAssistant(messages, userId);
     } catch (error) {
       // The user got no answer, so don't charge them for the message
-      await prisma.assistantConversation.updateMany({
-        where: { id: conversationId, creditsUsed: { gt: 0 } },
-        data: { creditsUsed: { decrement: 1 } },
+      await prisma.assistantDailyUsage.updateMany({
+        where: { userId, day, used: { gt: 0 } },
+        data: { used: { decrement: 1 } },
       });
       throw error;
     }

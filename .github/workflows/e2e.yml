@@ -1,0 +1,71 @@
+name: Browser tests
+
+# A real browser signs in as a test user, opens every page on desktop and
+# phone sizes, scrolls through it and uses the main features. Runs against the
+# production build and a throwaway database. See apps/web/e2e/README.md.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Pages and features in a browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kolab_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      CI: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+      E2E_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kolab_e2e
+      # Same values the tests start the app with. Set for the build too: the
+      # request guard (middleware) is compiled then.
+      NEXTAUTH_URL: http://localhost:3100
+      NEXTAUTH_SECRET: e2e-only-secret-never-used-in-production
+      API_RATE_LIMIT_PER_MINUTE: "100000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Install the browser
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: Build the app
+        run: npm run build
+        working-directory: apps/web
+      - name: Run browser tests
+        run: npm run test:e2e
+        working-directory: apps/web
+      # Screenshots and a step-by-step replay of anything that failed
+      - name: Upload failure report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-test-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7

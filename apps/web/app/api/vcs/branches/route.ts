@@ -31,20 +31,18 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: `Couldn't reach the repo: ${err.message}` }, { status: 502 });
   }
 
-  const { data } = await ctx.octokit.rest.repos.listBranches({
-    owner: ctx.owner,
-    repo: ctx.repo,
-    per_page: 100,
-  });
-
-  const crBranchNames = new Set(
-    (
-      await prisma.changeRequest.findMany({
-        where: { groupId, status: "OPEN" },
-        select: { branchName: true },
-      })
-    ).map((c) => c.branchName),
-  );
+  const [{ data }, openCrs] = await Promise.all([
+    ctx.octokit.rest.repos.listBranches({
+      owner: ctx.owner,
+      repo: ctx.repo,
+      per_page: 100,
+    }),
+    prisma.changeRequest.findMany({
+      where: { groupId, status: "OPEN" },
+      select: { branchName: true },
+    }),
+  ]);
+  const crBranchNames = new Set(openCrs.map((c) => c.branchName));
 
   const branches = data.map((b) => ({
     name: b.name,

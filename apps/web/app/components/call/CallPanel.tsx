@@ -146,6 +146,7 @@ export default function CallPanel({ onMinimize }: CallPanelProps) {
           onToggleScreenShare={handleToggleScreenShare}
           onToggleParticipantList={() => setParticipantListOpen((p) => !p)}
           onEndCall={endCall}
+          endLabel={activeCall.groupId ? "Leave Call" : "End Call"}
         />
       </div>
     </div>

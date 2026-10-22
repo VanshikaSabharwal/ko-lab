@@ -86,6 +86,8 @@ interface CallContextValue {
   activeCall: ActiveCall | null;
   initiateCall: (type: CallType, targetId?: string, groupId?: string) => Promise<void>;
   acceptCall: (callId: string, startWithVideo?: boolean) => Promise<void>;
+  /** Join a group call that's already in progress (rejoin, or join late). */
+  joinCall: (callId: string, withVideo?: boolean) => Promise<void>;
   rejectCall: (callId: string) => Promise<void>;
   endCall: () => Promise<void>;
   setIncomingCall: (call: IncomingCall | null) => void;
@@ -219,6 +221,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
             type: msg.groupId ? "GROUP" : msg.callType || "VIDEO",
             groupId: msg.groupId,
           });
+          if (msg.groupId) {
+            window.dispatchEvent(new CustomEvent("ko-lab:call-changed", { detail: { groupId: msg.groupId } }));
+          }
           break;
         case "call_ended": {
           const ac = activeCallRef.current;
@@ -227,6 +232,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
             resetCallState();
             reportCallEnded();
           }
+          // Stop ringing for a call that ended before it was answered
+          setIncomingCall((current) => (current?.callId === msg.callId ? null : current));
+          window.dispatchEvent(new CustomEvent("ko-lab:call-changed", { detail: { groupId: msg.groupId } }));
           break;
         }
         case "call_accepted":
@@ -236,6 +244,8 @@ export function CallProvider({ children }: { children: ReactNode }) {
           // Only the call it names — any user can send this message, so it
           // must not be able to drop whatever call we're in
           if (activeCallRef.current?.callId !== msg.callId) break;
+          // One member declining a group call doesn't end it for the rest
+          if (activeCallRef.current?.groupId) break;
           toast.error("Call rejected");
           activeCallRef.current?.room?.disconnect();
           callStartedAtRef.current = null;
@@ -321,6 +331,60 @@ export function CallProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // ── Joining a group call that's already going ───────────────────────
+  // Connects without the busy/“connecting” bookkeeping, which the two callers
+  // (the chat's Join button, and Start when a call already exists) each own.
+  const connectToOngoingCall = useCallback(async (callId: string, withVideo: boolean) => {
+    const res = await fetch(`/api/calls/${callId}/join`, { method: "PUT" });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(res.status === 410 ? "That call has already ended" : body.error || "Couldn't join the call");
+    }
+    const data = await res.json();
+
+    const room = new Room({
+      adaptiveStream: true,
+      dynacast: true,
+      audioCaptureDefaults: {},
+      videoCaptureDefaults: {
+        resolution: { width: 1280, height: 720 },
+        facingMode: "user",
+      },
+    });
+    await room.connect(process.env.NEXT_PUBLIC_LIVEKIT_URL!, data.token);
+    await publishLocalTracks(room, withVideo);
+    callStartedAtRef.current = Date.now();
+
+    setMuted(room.localParticipant.isMicrophoneEnabled === false);
+    setVideoEnabled(room.localParticipant.isCameraEnabled ?? false);
+    setActiveCall({
+      callId: data.callId,
+      roomName: data.roomName,
+      type: "GROUP",
+      token: data.token,
+      room,
+      groupId: data.groupId,
+    });
+    setCallStatus("connected");
+    window.dispatchEvent(new CustomEvent("ko-lab:call-changed", { detail: { groupId: data.groupId } }));
+  }, []);
+
+  const joinCall = useCallback(async (callId: string, withVideo: boolean = false) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setCallStatus("connecting");
+    try {
+      await connectToOngoingCall(callId, withVideo);
+    } catch (error) {
+      console.error("Join call error:", error);
+      toast.error(error instanceof Error ? error.message : "Couldn't join the call. Please try again.");
+      callStartedAtRef.current = null;
+      resetCallState();
+    } finally {
+      busyRef.current = false;
+    }
+  }, [connectToOngoingCall, resetCallState]);
+
   // ── initiateCall ─────────────────────────────────────────────────────
   const initiateCall = useCallback(async (
     type: CallType,
@@ -345,6 +409,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       if (!res.ok) {
         // A refusal (not a friend, not in the group) has a reason worth showing
         const body = await res.json().catch(() => ({}));
+        // The group already has a call: join that one rather than splitting
+        // the group across two
+        if (res.status === 409 && body.existingCallId) {
+          await connectToOngoingCall(body.existingCallId, type !== "AUDIO");
+          return;
+        }
         if (res.status === 403 && body.error) {
           toast.error(body.error);
           resetCallState();
@@ -411,7 +481,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       busyRef.current = false;
       setIsCalling(false);
     }
-  }, [session, wsSend, resetCallState]);
+  }, [session, wsSend, resetCallState, connectToOngoingCall]);
 
   // ── acceptCall ──────────────────────────────────────────────────────
   const acceptCall = useCallback(async (callId: string, startWithVideo: boolean = true) => {
@@ -468,6 +538,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         groupId: offer?.groupId,
       });
       setCallStatus("connected");
+      if (offer?.groupId) {
+        window.dispatchEvent(new CustomEvent("ko-lab:call-changed", { detail: { groupId: offer.groupId } }));
+      }
 
       // Notify initiator via WebSocket
       if (offer?.callerId) {
@@ -498,7 +571,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
     // round-trip, which is exactly the lag users noticed on Dismiss.
     setIncomingCall(null);
 
-    if (offer) {
+    // Only a one-to-one caller needs telling: for a group call a decline is
+    // just this person not joining, and the call goes on.
+    if (offer && !offer.groupId) {
       wsSend({
         type: "call_rejected",
         callId,
@@ -536,17 +611,39 @@ export function CallProvider({ children }: { children: ReactNode }) {
     // run behind the closed UI. Nothing sets isEnding here on purpose — the
     // panel is gone within the same render, so there is no button left to
     // put in a pending state.
-    wsSend({
-      type: "call_ended",
-      callId: call.callId,
-      ...(call.groupId ? { groupId: call.groupId } : {}),
-    });
+    const announceEnded = () =>
+      wsSend({
+        type: "call_ended",
+        callId: call.callId,
+        ...(call.groupId ? { groupId: call.groupId } : {}),
+      });
+
+    // A one-to-one call is over the moment either side hangs up. A group call
+    // carries on without you, so nobody is told it ended unless the server
+    // says you were the last one there.
+    if (!call.groupId) announceEnded();
     resetCallState();
-    reportCallEnded();
+    if (call.groupId) {
+      const startedAt = callStartedAtRef.current;
+      callStartedAtRef.current = null;
+      toast(
+        startedAt === null
+          ? "You left the call"
+          : `You left the call · ${formatDuration((Date.now() - startedAt) / 1000)}`,
+      );
+    } else {
+      reportCallEnded();
+    }
 
     try {
       call.room?.disconnect();
-      await fetch(`/api/calls/${call.callId}/end`, { method: "PUT" });
+      const res = await fetch(`/api/calls/${call.callId}/end`, { method: "PUT" });
+      if (call.groupId) {
+        const body = await res.json().catch(() => ({}));
+        if (body.ended) announceEnded();
+        // The chat's "call in progress" bar and its call log refresh on this
+        window.dispatchEvent(new CustomEvent("ko-lab:call-changed", { detail: { groupId: call.groupId } }));
+      }
     } catch (error) {
       console.error("End call error:", error);
     }
@@ -598,6 +695,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       activeCall,
       initiateCall,
       acceptCall,
+      joinCall,
       rejectCall,
       endCall,
       setIncomingCall,

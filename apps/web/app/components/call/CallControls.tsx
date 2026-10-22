@@ -12,6 +12,8 @@ interface CallControlsProps {
   onToggleScreenShare: () => void;
   onToggleParticipantList: () => void;
   onEndCall: () => void;
+  /** "Leave Call" for a group call, which carries on without you. */
+  endLabel?: string;
 }
 
 export default function CallControls({
@@ -24,6 +26,7 @@ export default function CallControls({
   onToggleScreenShare,
   onToggleParticipantList,
   onEndCall,
+  endLabel = "End Call",
 }: CallControlsProps) {
   return (
     <div className="flex items-center justify-center gap-3 px-4 py-3">
@@ -60,7 +63,7 @@ export default function CallControls({
         className="flex items-center gap-2 rounded-full bg-red-600 px-5 py-3 text-white shadow-lg transition hover:bg-red-700"
       >
         <PhoneOff className="h-5 w-5" />
-        <span className="text-sm font-medium">End Call</span>
+        <span className="text-sm font-medium">{endLabel}</span>
       </button>
     </div>
   );

@@ -5,6 +5,8 @@ import { FaUsers, FaPaperPlane, FaUserPlus } from "react-icons/fa";
 import toast from "react-hot-toast";
 import Link from "next/link";
 import { fetchWsToken } from "../lib/wsAuth";
+import OngoingCallBar from "./call/OngoingCallBar";
+import { isCallEvent, isSystemMessage, systemMessageText } from "../lib/systemMessages";
 
 interface GroupChatProps {
   group: string;
@@ -38,8 +40,6 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const groupName = groupDetails?.groupName;
   const githubRepo = groupDetails?.githubRepo;
-  console.log("groupName: ", groupName);
-  console.log("githubRepo: ", githubRepo);
 
   const senderId = session?.user?.id;
   const senderName = session?.user?.name;
@@ -52,14 +52,11 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
 
   const fetchMessages = async () => {
     if (group) {
-      console.log("[FETCH] Loading messages for group:", group);
       try {
         const res = await fetch(`/api/save-group-message?group=${group}`, {
           method: "GET",
         });
-        console.log("[FETCH] Response status:", res.status);
         const data: Message[] = await res.json();
-        console.log("[FETCH] Messages loaded:", data.length, data);
         setMessages(data);
       } catch (err) {
         console.error("[FETCH] ❌ Error fetching messages:", err);
@@ -101,15 +98,11 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
   useEffect(() => {
     if (session && groupDetails) {
       const fetchMembers = async () => {
-        console.log("[MEMBER] Checking membership for userId:", senderId, "groupId:", group);
         try {
           const res = await fetch(
             `/api/check-group-member?group=${group}&userId=${senderId}`,
           );
           const data = await res.json();
-          console.log("[MEMBER] Response:", data, "isMember:", data.exists);
-          console.log("[MEMBER] groupDetails.ownerId:", groupDetails?.ownerId, "session.user.id:", session?.user?.id);
-          console.log("[MEMBER] isOwner:", session?.user?.id === groupDetails?.ownerId);
           setIsMember(data.exists);
         } catch (err) {
           console.error("[MEMBER] ❌ Error:", err);
@@ -136,7 +129,6 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
         wsRef.current = ws;
 
         ws.onopen = () => {
-          console.log("[WS] ✅ Connected! readyState:", ws.readyState);
           setIsConnected(true);
           reconnectAttempts.current = 0;
           heartbeatRef.current = setInterval(() => {
@@ -147,11 +139,8 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
         };
 
         ws.onmessage = (event) => {
-          console.log("[WS] 📨 Raw message received:", event.data);
           const message = JSON.parse(event.data);
-          console.log("[WS] Parsed message:", message);
           if (message.type === "pong" || message.type === "connection_established") {
-            console.log("[WS] System message, ignoring:", message.type);
             return;
           }
           // Call signalling and workspace traffic share this socket. Appending
@@ -174,13 +163,11 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
         };
 
         ws.onclose = (event) => {
-          console.log("[WS] ❌ Connection closed. Code:", event.code, "Reason:", event.reason, "Clean:", event.wasClean);
           if (heartbeatRef.current) clearInterval(heartbeatRef.current);
           wsRef.current = null;
           setIsConnected(false);
           if (!isMountedRef.current) return;
           const delay = Math.min(1000 * 2 ** reconnectAttempts.current, 30_000);
-          console.log(`[WS] Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current + 1})`);
           reconnectAttempts.current += 1;
           setTimeout(connect, delay);
         };
@@ -210,18 +197,13 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
   const handleSendMessage = async () => {
     const canSend = isMember || session?.user.id === groupDetails?.ownerId;
 
-    console.log("[SEND] handleSendMessage called");
-    console.log("[SEND] newMessage:", newMessage);
-    console.log("[SEND] isMember:", isMember, "isOwner:", session?.user.id === groupDetails?.ownerId);
-    console.log("[SEND] canSend:", canSend);
-    console.log("[SEND] wsRef.current:", wsRef.current);
-    console.log("[SEND] ws readyState:", wsRef.current?.readyState, "(1=OPEN, 0=CONNECTING, 2=CLOSING, 3=CLOSED)");
 
     if (!newMessage.trim()) return;
 
     if (!canSend) {
-      console.warn("[SEND] Blocked — isMember:", isMember, "| session.user.id:", session?.user.id, "| groupDetails.ownerId:", groupDetails?.ownerId);
-      toast.error(`Cannot send: isMember=${isMember}, isOwner=${session?.user.id === groupDetails?.ownerId}, groupLoaded=${!!groupDetails}`);
+      toast.error(
+        groupDetails ? "Only members of this group can send messages here." : "Still loading the group. Try again in a moment.",
+      );
       return;
     }
 
@@ -234,7 +216,6 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
       createdAt: Date.now(),
     };
 
-    console.log("[SEND] Message object:", message);
 
     // Optimistic update
     setMessages((prev) => [...prev, message]);
@@ -242,27 +223,23 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
 
     // Send via WebSocket if connected
     if (wsRef.current?.readyState === WebSocket.OPEN) {
-      console.log("[SEND] ✅ Sending via WebSocket");
       wsRef.current.send(JSON.stringify(message));
     } else {
       console.warn("[SEND] ⚠️ WebSocket not open, skipping WS send. readyState:", wsRef.current?.readyState);
     }
 
     // Always save to DB
-    console.log("[SEND] Saving to DB...");
     try {
       const response = await fetch("/api/save-group-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(message),
       });
-      console.log("[SEND] DB response status:", response.status);
       if (!response.ok) {
         const err = await response.json();
         console.error("[SEND] DB error body:", err);
         throw new Error("Failed to save message");
       }
-      console.log("[SEND] ✅ Saved to DB");
     } catch (error) {
       console.error("[SEND] ❌ DB save failed:", error);
       toast.error("Message sent but failed to save. It may not appear after refresh.");
@@ -321,11 +298,31 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
               Code Editor
             </a>
           </div>
+          {/* A call you can join, and the reload that brings in its log lines */}
+          <OngoingCallBar groupId={group} onChange={fetchMessages} />
           <div
             className="flex-1 overflow-y-auto p-4"
             style={{ maxHeight: "calc(100vh - 240px)" }}
           >
-            {messages.map((msg, index) => (
+            {messages.map((msg, index) =>
+              // App-written lines (added to the group, call log) aren't from a
+              // person: a centred note, not a chat bubble of raw text
+              isSystemMessage(msg.content) ? (
+                <div key={index} className="my-2 flex justify-center">
+                  <span className="rounded-full bg-gray-200/70 px-3 py-1 text-center text-xs text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                    {systemMessageText(msg.content, {
+                      viewerId: session?.user?.id,
+                      senderId: msg.senderId,
+                    })}
+                    {isCallEvent(msg.content) && msg.createdAt && (
+                      <span className="opacity-70">
+                        {" · "}
+                        {new Date(msg.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                      </span>
+                    )}
+                  </span>
+                </div>
+              ) : (
               <div
                 key={index}
                 className={`flex mb-4 ${
@@ -348,18 +345,10 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
                   </p>
                 </div>
               </div>
-            ))}
+              ),
+            )}
             <div ref={messagesEndRef} />
           </div>
-          {/* Debug status bar — remove after confirming it works */}
-          <div className="text-xs px-4 py-1 bg-yellow-50 dark:bg-yellow-900/20 border-t border-yellow-200 dark:border-yellow-800 flex gap-3 flex-wrap">
-            <span>WS: <b>{isConnected ? "✅ connected" : "❌ disconnected"}</b></span>
-            <span>member: <b>{String(isMember)}</b></span>
-            <span>owner: <b>{String(session?.user.id === groupDetails?.ownerId)}</b></span>
-            <span>userId: <b>{session?.user.id ?? "undefined"}</b></span>
-            <span>ownerId: <b>{groupDetails?.ownerId ?? "loading…"}</b></span>
-          </div>
-
           <div className="bg-gray-100 dark:bg-gray-900 p-4">
             <div className="flex items-center">
               <input

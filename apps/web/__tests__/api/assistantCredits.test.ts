@@ -1,38 +1,47 @@
 /**
  * Assistant message credits.
  *
- * Each conversation gets CREDITS_PER_CONVERSATION credits and every user
- * message spends one. The count lives in the database so the limit can't be
- * bypassed from the browser, and a failed model call hands the credit back.
+ * Each user gets DAILY_CREDITS credits per UTC day and every message spends
+ * one, whichever conversation it is sent in. The count lives in the database
+ * so the limit can't be bypassed from the browser, and a failed model call
+ * hands the credit back.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-// A tiny in-memory stand-in for the AssistantConversation table
-type Row = { id: string; userId: string; creditsTotal: number; creditsUsed: number };
-const rows = new Map<string, Row>();
+// Tiny in-memory stand-ins for the two tables
+const conversations = new Map<string, { id: string; userId: string }>();
+const usage = new Map<string, { used: number }>();
+const key = (userId: string, day: string) => `${userId}|${day}`;
 
 vi.mock("../../app/lib/prisma", () => ({
   default: {
     assistantConversation: {
       create: vi.fn(async ({ data }: any) => {
-        const row = { id: `conv${rows.size + 1}`, creditsUsed: 0, ...data };
-        rows.set(row.id, row);
+        const row = { id: `conv${conversations.size + 1}`, userId: data.userId };
+        conversations.set(row.id, row);
         return { id: row.id };
       }),
       findFirst: vi.fn(async ({ where }: any) => {
-        const row = rows.get(where.id);
+        const row = conversations.get(where.id);
         return row && row.userId === where.userId ? row : null;
       }),
-      findUniqueOrThrow: vi.fn(async ({ where }: any) => ({ ...rows.get(where.id)! })),
+    },
+    assistantDailyUsage: {
+      createMany: vi.fn(async ({ data }: any) => {
+        for (const d of data) {
+          if (!usage.has(key(d.userId, d.day))) usage.set(key(d.userId, d.day), { used: 0 });
+        }
+      }),
+      findUnique: vi.fn(async ({ where }: any) => {
+        const { userId, day } = where.userId_day;
+        return usage.get(key(userId, day)) ?? null;
+      }),
       updateMany: vi.fn(async ({ where, data }: any) => {
-        const row = rows.get(where.id);
+        const row = usage.get(key(where.userId, where.day));
         if (!row) return { count: 0 };
-        if (where.userId && row.userId !== where.userId) return { count: 0 };
-        if (where.creditsUsed?.lt !== undefined && !(row.creditsUsed < where.creditsUsed.lt))
-          return { count: 0 };
-        if (where.creditsUsed?.gt !== undefined && !(row.creditsUsed > where.creditsUsed.gt))
-          return { count: 0 };
-        row.creditsUsed += data.creditsUsed.increment ?? -data.creditsUsed.decrement;
+        if (where.used?.lt !== undefined && !(row.used < where.used.lt)) return { count: 0 };
+        if (where.used?.gt !== undefined && !(row.used > where.used.gt)) return { count: 0 };
+        row.used += data.used.increment ?? -data.used.decrement;
         return { count: 1 };
       }),
     },
@@ -52,9 +61,9 @@ vi.mock("groq-sdk", () => ({
 
 process.env.GROQ_API_KEY = "test";
 
-import { POST } from "../../app/api/assistant/route";
+import { GET, POST } from "../../app/api/assistant/route";
 import { getServerSession } from "next-auth";
-import { CREDITS_PER_CONVERSATION } from "../../app/lib/assistantCredits";
+import { DAILY_CREDITS } from "../../app/lib/assistantCredits";
 
 const reply = { choices: [{ finish_reason: "stop", message: { content: "Hi!" } }] };
 
@@ -68,34 +77,44 @@ function send(conversationId?: string) {
 }
 
 beforeEach(() => {
-  rows.clear();
+  conversations.clear();
+  usage.clear();
   vi.clearAllMocks();
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-04T10:00:00Z"));
   (getServerSession as ReturnType<typeof vi.fn>).mockResolvedValue({ user: { id: "me" } });
   create.mockResolvedValue(reply);
 });
 
-describe("POST /api/assistant credits", () => {
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("assistant daily credits", () => {
   it("starts a conversation and spends one credit on the first message", async () => {
     const res = await send();
     const body = await res.json();
 
     expect(res.status).toBe(200);
     expect(body.conversationId).toBe("conv1");
-    expect(body.credits).toEqual({
-      total: CREDITS_PER_CONVERSATION,
-      used: 1,
-      remaining: CREDITS_PER_CONVERSATION - 1,
-    });
+    expect(body.credits).toEqual({ total: DAILY_CREDITS, used: 1, remaining: DAILY_CREDITS - 1 });
   });
 
-  it("refuses with 402 once the allowance is used, without calling the model", async () => {
-    const { conversationId } = await (await send()).json();
-    for (let i = 1; i < CREDITS_PER_CONVERSATION; i++) {
-      expect((await send(conversationId)).status).toBe(200);
+  it("doesn't refill the allowance when a new chat is started", async () => {
+    await send();
+    const body = await (await send()).json();
+
+    expect(body.conversationId).toBe("conv2");
+    expect(body.credits.used).toBe(2);
+  });
+
+  it("refuses with 402 once the day's allowance is used, without calling the model", async () => {
+    for (let i = 0; i < DAILY_CREDITS; i++) {
+      expect((await send()).status).toBe(200);
     }
     create.mockClear();
 
-    const res = await send(conversationId);
+    const res = await send();
     const body = await res.json();
 
     expect(res.status).toBe(402);
@@ -104,12 +123,28 @@ describe("POST /api/assistant credits", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("gives a full allowance again on the next UTC day", async () => {
+    for (let i = 0; i < DAILY_CREDITS; i++) await send();
+    vi.setSystemTime(new Date("2026-10-05T00:00:01Z"));
+
+    const body = await (await send()).json();
+    expect(body.credits.used).toBe(1);
+  });
+
+  it("counts each user separately", async () => {
+    await send();
+    (getServerSession as ReturnType<typeof vi.fn>).mockResolvedValue({ user: { id: "other" } });
+
+    const body = await (await send()).json();
+    expect(body.credits.used).toBe(1);
+  });
+
   it("refunds the credit when the model call fails", async () => {
-    const { conversationId } = await (await send()).json();
+    await send();
     create.mockRejectedValueOnce(new Error("groq down"));
 
-    expect((await send(conversationId)).status).toBe(500);
-    expect(rows.get(conversationId)!.creditsUsed).toBe(1);
+    expect((await send()).status).toBe(500);
+    expect(usage.get(key("me", "2026-10-04"))!.used).toBe(1);
   });
 
   it("won't spend credits on someone else's conversation", async () => {
@@ -117,6 +152,13 @@ describe("POST /api/assistant credits", () => {
     (getServerSession as ReturnType<typeof vi.fn>).mockResolvedValue({ user: { id: "intruder" } });
 
     expect((await send(conversationId)).status).toBe(404);
-    expect(rows.get(conversationId)!.creditsUsed).toBe(1);
+    expect(usage.has(key("intruder", "2026-10-04"))).toBe(false);
+  });
+
+  it("reports today's allowance on GET", async () => {
+    await send();
+    const body = await (await GET()).json();
+
+    expect(body.credits).toEqual({ total: DAILY_CREDITS, used: 1, remaining: DAILY_CREDITS - 1 });
   });
 });

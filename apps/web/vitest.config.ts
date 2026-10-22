@@ -9,6 +9,9 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     include: ["__tests__/**/*.test.{ts,tsx}"],
+    // These need LocalStack running; they have their own config and command
+    // (`npm run test:storage`).
+    exclude: ["__tests__/storage/**", "**/node_modules/**"],
     alias: {
       "@": path.resolve(__dirname, "./app"),
     },

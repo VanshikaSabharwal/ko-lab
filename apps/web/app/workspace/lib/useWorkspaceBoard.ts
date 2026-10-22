@@ -14,6 +14,7 @@ import {
   type XYPosition,
 } from "@xyflow/react";
 import { useWorkspaceSocket, type WorkspaceBoardType } from "./useWorkspaceSocket";
+import { mergeBoards, sameBoard, type Graph } from "./mergeBoard";
 
 type GraphBoardOp =
   | { action: "nodes_change"; changes: NodeChange[] }
@@ -56,6 +57,8 @@ interface UseWorkspaceBoardOptions {
 }
 
 const SAVE_DEBOUNCE_MS = 1500;
+// A save that keeps colliding (a very busy board) gives up and waits for the next edit
+const MAX_SAVE_ATTEMPTS = 4;
 // Matches the cadence CursorLayer already uses for its own throttled sends.
 const DRAG_BROADCAST_MS = 50;
 
@@ -108,6 +111,10 @@ export function useWorkspaceBoard({ groupId, type, slug, userId, onPeerCursor }:
   const [loaded, setLoaded] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The board as last saved or loaded, and its version: the base for merging. */
+  const synced = useRef<{ graph: Graph; updatedAt: string | null } | null>(null);
+  /** Set by this browser's own edits, which are the only ones it saves. */
+  const localEdit = useRef(false);
   const onPeerCursorRef = useRef(onPeerCursor);
   onPeerCursorRef.current = onPeerCursor;
 
@@ -156,12 +163,21 @@ export function useWorkspaceBoard({ groupId, type, slug, userId, onPeerCursor }:
     }
   }, []);
 
-  const { isConnected, isOffline, presence, sendOp } = useWorkspaceSocket({
+  const { isConnected, isOffline, presence, sendOp: broadcast } = useWorkspaceSocket({
     groupId,
     board: type,
     userId,
     onRemoteOp: applyRemoteOp,
   });
+
+  // Every local change is broadcast, so this is where it's marked for saving
+  const sendOp = useCallback(
+    (op: GraphBoardOp | PeerCursorOp) => {
+      if (op.action !== "cursor") localEdit.current = true;
+      broadcast(op);
+    },
+    [broadcast],
+  );
 
   useEffect(() => {
     if (!userId) return;
@@ -170,9 +186,11 @@ export function useWorkspaceBoard({ groupId, type, slug, userId, onPeerCursor }:
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
-        setNodes(data.content?.nodes ?? []);
-        setEdges(data.content?.edges ?? []);
+        const loadedGraph = { nodes: data.content?.nodes ?? [], edges: data.content?.edges ?? [] };
+        setNodes(loadedGraph.nodes);
+        setEdges(loadedGraph.edges);
         setUpdatedAt(data.updatedAt ?? null);
+        synced.current = { graph: loadedGraph, updatedAt: data.updatedAt ?? null };
         setLoaded(true);
       });
     return () => {
@@ -180,23 +198,74 @@ export function useWorkspaceBoard({ groupId, type, slug, userId, onPeerCursor }:
     };
   }, [groupId, slug, userId]);
 
+  // ── Saving ──
+  // Each save says which version of the board it was made from. If someone
+  // else saved in between, the server refuses and returns its copy; the two
+  // are merged element by element (see mergeBoard.ts), shown, and saved again.
+  // Saving over the server's copy blindly used to erase their changes.
+  const latest = useRef<Graph>({ nodes, edges });
+  latest.current = { nodes, edges };
+  const saving = useRef<Promise<void>>(Promise.resolve());
+
+  const save = useCallback(() => {
+    // One save at a time: each needs the version the previous one produced
+    saving.current = saving.current.then(async () => {
+      for (let attempt = 0; attempt < MAX_SAVE_ATTEMPTS; attempt++) {
+        const base = synced.current;
+        const content = latest.current;
+        if (base && sameBoard(base.graph, content)) return; // nothing new to save
+        try {
+          const res = await fetch(`/api/workspace/${groupId}/${slug}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content, baseUpdatedAt: base?.updatedAt ?? null }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            synced.current = { graph: content, updatedAt: data.updatedAt ?? null };
+            setUpdatedAt(data.updatedAt ?? null);
+            return;
+          }
+          if (res.status !== 409) return;
+
+          // Someone saved first: keep both sets of changes
+          const theirs: Graph = { nodes: data.content?.nodes ?? [], edges: data.content?.edges ?? [] };
+          const merged = mergeBoards(base?.graph ?? { nodes: [], edges: [] }, latest.current, theirs);
+          synced.current = { graph: theirs, updatedAt: data.updatedAt ?? null };
+          latest.current = merged;
+          setNodes(merged.nodes);
+          setEdges(merged.edges);
+          // Peers have only seen my individual edits; send the merged whole
+          sendOp({ action: "replace", nodes: merged.nodes, edges: merged.edges });
+        } catch {
+          return; // offline: the next edit, or reconnecting, tries again
+        }
+      }
+    });
+  }, [groupId, slug, sendOp]);
+
+  // Saved by whoever made the change: an edit received from a peer is that
+  // peer's to save, and saving it here too doubled every write and the chance
+  // of two saves colliding.
   useEffect(() => {
-    if (!loaded || !userId) return;
+    if (!loaded || !userId || !localEdit.current) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      fetch(`/api/workspace/${groupId}/${slug}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, content: { nodes, edges } }),
-      })
-        .then((res) => res.json())
-        .then((data) => setUpdatedAt(data.updatedAt ?? null))
-        .catch(() => {});
+      localEdit.current = false;
+      save();
     }, SAVE_DEBOUNCE_MS);
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
-  }, [nodes, edges, loaded, groupId, slug, userId]);
+  }, [nodes, edges, loaded, userId, save]);
+
+  // Leaving the board within the save delay used to drop the last edit
+  useEffect(
+    () => () => {
+      if (localEdit.current) save();
+    },
+    [save],
+  );
 
   // A continuous drag fires ~60 position changes/second. The WS server caps
   // both message size and messages-per-second and answers with {type:"error"},

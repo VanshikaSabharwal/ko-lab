@@ -2,6 +2,63 @@
 @tailwind components;
 @tailwind utilities;
 
+/* The grey scale as variables (see tailwind.config.js). These are Tailwind's
+   default greys; the code editor replaces them with its theme's colours. */
+:root {
+  --gray-50: 249 250 251;
+  --gray-100: 243 244 246;
+  --gray-200: 229 231 235;
+  --gray-300: 209 213 219;
+  --gray-400: 156 163 175;
+  --gray-500: 107 114 128;
+  --gray-600: 75 85 99;
+  --gray-700: 55 65 81;
+  --gray-800: 31 41 55;
+  --gray-900: 17 24 39;
+  --gray-950: 3 7 18;
+}
+
+/* ── Code editor themed with a light theme ──────────────────────────────
+   The IDE always uses its dark-mode layout, with the grey scale remapped to
+   the theme. Greys follow automatically; literal white text does not, and on
+   a light theme it would be white on white. Buttons with a coloured
+   background keep their white text. */
+.ide-themed[data-ide-light="true"] .dark\:text-white,
+.ide-themed[data-ide-light="true"] .dark\:hover\:text-white:hover,
+.ide-themed[data-ide-light="true"] .hover\:text-white:hover,
+.ide-themed[data-ide-light="true"]
+  .text-white:not([class*="bg-blue-"]):not([class*="bg-green-"]):not([class*="bg-emerald-"]):not([class*="bg-purple-"]):not([class*="bg-red-"]):not([class*="bg-amber-"]):not([class*="bg-gradient-"]):not([class*="bg-black"]) {
+  color: rgb(var(--gray-50));
+}
+
+/* ── Code editor settings: preview beside the settings ──────────────────
+   Laid out by the width of the settings panel itself (a container query),
+   not the window: the sidebar, the AI panel and browser zoom all change how
+   much room the panel has. */
+.ide-settings {
+  container-type: inline-size;
+}
+.ide-settings-grid,
+.ide-settings-bar {
+  max-width: 48rem;
+}
+@container (min-width: 44rem) {
+  .ide-settings-grid,
+  .ide-settings-bar {
+    max-width: 80rem;
+  }
+  .ide-settings-grid {
+    /* The settings get the larger share; the preview never drops below 17rem */
+    grid-template-columns: minmax(0, 1.5fr) minmax(17rem, 1fr);
+  }
+  /* Stays in view while the settings scroll past */
+  .ide-settings-preview {
+    position: sticky;
+    top: 1.5rem;
+    align-self: start;
+  }
+}
+
 /* globals.css */
 .scrollbar-hide::-webkit-scrollbar {
   display: none;

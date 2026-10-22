@@ -46,6 +46,19 @@ export function uploadGroupImage(
   return uploadImage(`group-images/${groupId}`, buffer, contentType);
 }
 
+/**
+ * A picture placed on a group's UI/UX design board. Same bucket and client as
+ * the photos above (R2 in production, LocalStack in development), under its
+ * own folder.
+ */
+export function uploadDesignImage(
+  groupId: string,
+  buffer: Buffer,
+  contentType: string,
+): Promise<string> {
+  return uploadImage(`design-images/${groupId}`, buffer, contentType);
+}
+
 async function uploadImage(
   prefix: string,
   buffer: Buffer,

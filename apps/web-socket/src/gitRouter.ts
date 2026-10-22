@@ -9,6 +9,8 @@ import {
   readFileContent,
   readFileRaw,
   branchDir,
+  GitAuthError,
+  redactCredentials,
 } from "./gitWorkspace";
 
 // ── Service-to-service auth ───────────────────────────────────────────────────
@@ -42,7 +44,7 @@ git.post("/default-branch", async (req, res) => {
     const branch = await resolveDefaultBranch(repoUrl);
     res.json({ branch });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: redactCredentials(e.message) });
   }
 });
 
@@ -60,8 +62,11 @@ git.post("/ensure", async (req, res) => {
     });
     res.json({ files });
   } catch (e: any) {
-    console.error("Git ensure error:", e);
-    res.status(500).json({ error: e.message });
+    if (e instanceof GitAuthError) {
+      return res.status(401).json({ error: e.message, code: e.code });
+    }
+    console.error("Git ensure error:", redactCredentials(String(e?.message ?? e)));
+    res.status(500).json({ error: redactCredentials(e.message) });
   }
 });
 

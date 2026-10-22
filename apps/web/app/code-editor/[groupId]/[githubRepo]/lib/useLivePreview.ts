@@ -72,7 +72,7 @@ export function useLivePreview(groupId: string) {
       setTimeout(() => {
         toast(
           `Your live site was taken down after ${PRIVATE_PREVIEW_MINUTES} minutes. Click Make it live to run it again.`,
-          { id: "live-preview-expired", icon: "🔌", duration: 15_000 },
+          { id: "live-preview-expired", duration: 15_000 },
         );
         // Force a re-render so the control shows the expired state
         setPreview((p) => (p ? { ...p } : p));

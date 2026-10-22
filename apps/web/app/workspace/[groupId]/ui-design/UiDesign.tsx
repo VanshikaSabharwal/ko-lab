@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import { v4 as uuid } from "uuid";
+import toast from "react-hot-toast";
 import type { Edge, Node, NodeChange, NodeTypes, OnSelectionChangeFunc, XYPosition } from "@xyflow/react";
 import { useWorkspaceBoard, type PeerCursorOp } from "../../lib/useWorkspaceBoard";
 import WorkspaceCanvas from "../../components/WorkspaceCanvas";
@@ -25,7 +26,7 @@ type Snapshot = { nodes: Node[]; edges: Edge[] };
 
 // Strip render-injected callbacks before storing/cloning node data
 function cleanData(data: Record<string, unknown>) {
-  const { onChange: _onChange, ...rest } = data;
+  const { onChange: _onChange, onPickImage: _onPickImage, uploading: _uploading, ...rest } = data;
   return rest;
 }
 
@@ -90,7 +91,6 @@ export default function UiDesign({ groupId }: UiDesignProps) {
   } = useWorkspaceBoard({ groupId, type: "UI_DESIGN", slug: "ui-design", userId, onPeerCursor });
 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
-  const [snap, setSnap] = useState(false);
 
   // ── Undo / redo (structural changes: add, delete, duplicate, template) ──
   const undoStack = useRef<Snapshot[]>([]);
@@ -339,6 +339,52 @@ export default function UiDesign({ groupId }: UiDesignProps) {
   }, [duplicateSelection, nudgeSelection, undo, redo, groupSelection, ungroupSelection]);
 
   // ── Render ──
+  // ── Image upload ──
+  // One hidden file input for the whole board; `uploadTarget` is the element
+  // the picked file is for.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadTarget = useRef<string | null>(null);
+  const [uploadingIds, setUploadingIds] = useState<Set<string>>(new Set());
+
+  const pickImage = useCallback((nodeId: string) => {
+    uploadTarget.current = nodeId;
+    fileInputRef.current?.click();
+  }, []);
+
+  const uploadImage = async (file: File) => {
+    const nodeId = uploadTarget.current;
+    if (!nodeId) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+      toast.error("Use a PNG, JPEG or WebP image");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("That image is over 5 MB");
+      return;
+    }
+    setUploadingIds((ids) => new Set(ids).add(nodeId));
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch(`/api/workspace/${encodeURIComponent(groupId)}/design-image`, {
+        method: "POST",
+        body,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Couldn't upload the image");
+      pushHistory();
+      updateNodeData(nodeId, { src: data.url });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't upload the image");
+    } finally {
+      setUploadingIds((ids) => {
+        const next = new Set(ids);
+        next.delete(nodeId);
+        return next;
+      });
+    }
+  };
+
   const displayNodes = useMemo(
     () =>
       nodes.map((n) => ({
@@ -346,9 +392,11 @@ export default function UiDesign({ groupId }: UiDesignProps) {
         data: {
           ...n.data,
           onChange: (label: string) => updateNodeData(n.id, { label }),
+          onPickImage: () => pickImage(n.id),
+          uploading: uploadingIds.has(n.id),
         },
       })),
-    [nodes, updateNodeData],
+    [nodes, updateNodeData, pickImage, uploadingIds],
   );
 
   const handleDropItem = (payload: string, position: { x: number; y: number }) => {
@@ -392,6 +440,19 @@ export default function UiDesign({ groupId }: UiDesignProps) {
   const canRedo = redoStack.current.length > 0;
 
   return (
+    <>
+    <input
+      ref={fileInputRef}
+      type="file"
+      accept="image/png,image/jpeg,image/webp"
+      className="hidden"
+      onChange={(e) => {
+        const file = e.target.files?.[0];
+        // Reset so picking the same file again still fires onChange
+        e.target.value = "";
+        if (file) void uploadImage(file);
+      }}
+    />
     <WorkspaceCanvas
       groupId={groupId}
       title="UI/UX Design"
@@ -405,8 +466,6 @@ export default function UiDesign({ groupId }: UiDesignProps) {
       onEdgesChange={onEdgesChange}
       onConnect={onConnect}
       onSelectionChange={onSelectionChange}
-      snapToGrid={snap}
-      snapGrid={[8, 8]}
       // Render prop so the palette gets an insert-at-centre callback for taps —
       // HTML5 drag events never fire on touch, which left this board unusable
       // on mobile.
@@ -418,6 +477,8 @@ export default function UiDesign({ groupId }: UiDesignProps) {
           onPatchNode={updateNode}
           onDuplicate={duplicateSelection}
           onDelete={deleteSelection}
+          onPickImage={pickImage}
+          uploading={!!selectedNode && uploadingIds.has(selectedNode.id)}
         />
       }
       toolbar={
@@ -426,8 +487,6 @@ export default function UiDesign({ groupId }: UiDesignProps) {
           canRedo={canRedo}
           onUndo={undo}
           onRedo={redo}
-          snap={snap}
-          onToggleSnap={() => setSnap((s) => !s)}
           canGroup={canGroup}
           canUngroup={!!ungroupTargetId}
           onGroup={groupSelection}
@@ -446,5 +505,6 @@ export default function UiDesign({ groupId }: UiDesignProps) {
       }
       onDropItem={handleDropItem}
     />
+    </>
   );
 }

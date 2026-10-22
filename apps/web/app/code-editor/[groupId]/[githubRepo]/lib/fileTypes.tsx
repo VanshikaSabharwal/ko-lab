@@ -1,22 +1,9 @@
 import React from "react";
-import { javascript } from "@codemirror/lang-javascript";
-import { python } from "@codemirror/lang-python";
-import { html } from "@codemirror/lang-html";
-import { java } from "@codemirror/lang-java";
-import { css } from "@codemirror/lang-css";
-import { json } from "@codemirror/lang-json";
-import { markdown } from "@codemirror/lang-markdown";
-import { xml } from "@codemirror/lang-xml";
-import { yaml } from "@codemirror/lang-yaml";
-import { rust } from "@codemirror/lang-rust";
-import { php } from "@codemirror/lang-php";
-import { sql } from "@codemirror/lang-sql";
-import { cpp } from "@codemirror/lang-cpp";
-import { type Extension } from "@codemirror/state";
 import { FileText, FileCode, FileJson, File } from "lucide-react";
 
 /**
- * Language modes, file-type icons and file-tree shaping.
+ * File-type icons, labels and file-tree shaping. Language modes are loaded
+ * on demand in ./languages.
  *
  * Extracted from Editor.tsx unchanged — these are pure and shared by the tree,
  * the tab bar and the status bar, so they don't belong in a component.
@@ -29,7 +16,10 @@ export interface CodeFile {
   size: number;
   url: string;
   content?: string;
+  /** Has never been saved: its text is `content`, not something to fetch. */
   _generated?: boolean;
+  /** Not in the repo: created by this user and waiting on a change request. */
+  draft?: boolean;
 }
 
 export interface TreeNode {
@@ -39,46 +29,6 @@ export interface TreeNode {
   children: TreeNode[];
   file?: CodeFile;
 }
-
-const EXTENSION_MAP: Record<string, () => Extension> = {
-  ".js": javascript,
-  ".jsx": () => javascript({ jsx: true }),
-  ".ts": () => javascript({ typescript: true }),
-  ".tsx": () => javascript({ jsx: true, typescript: true }),
-  ".mjs": javascript,
-  ".cjs": javascript,
-  ".py": python,
-  ".pyw": python,
-  ".java": java,
-  ".html": html,
-  ".htm": html,
-  ".css": css,
-  ".scss": css,
-  ".sass": css,
-  ".less": css,
-  ".json": json,
-  ".jsonc": json,
-  ".md": markdown,
-  ".mdx": markdown,
-  ".xml": xml,
-  ".svg": xml,
-  ".yaml": yaml,
-  ".yml": yaml,
-  ".rs": rust,
-  ".php": php,
-  ".phtml": php,
-  ".sql": sql,
-  ".c": cpp,
-  ".cpp": cpp,
-  ".h": cpp,
-  ".hpp": cpp,
-  ".cs": cpp,
-  ".go": () => javascript({ typescript: true }),
-  ".rb": python,
-  ".vue": html,
-  ".svelte": html,
-  ".astro": html,
-};
 
 const FILE_ICON_MAP: Record<
   string,
@@ -128,12 +78,6 @@ const FILE_ICON_MAP: Record<
   ".ico": { icon: <FileCode size={15} />, color: "text-purple-400" },
   ".webp": { icon: <FileCode size={15} />, color: "text-purple-400" },
 };
-
-export function getFileLanguage(fileName: string) {
-  const ext = "." + fileName.split(".").pop()?.toLowerCase();
-  const lang = EXTENSION_MAP[ext];
-  return lang ? lang() : javascript();
-}
 
 export function getFileIcon(fileName: string) {
   const ext = "." + fileName.split(".").pop()?.toLowerCase();

@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { diffLines } from "diff";
 import toast from "react-hot-toast";
 import { useSession } from "next-auth/react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 interface GroupProps {
   group: string;
@@ -17,6 +19,7 @@ interface DraftFile {
 
 interface ChangeRequest {
   id: string;
+  authorId: string;
   title: string;
   branchName: string;
   prNumber: number | null;
@@ -151,6 +154,7 @@ const STATUS_STYLE: Record<ChangeRequest["status"], string> = {
 const Confirm = ({ group }: GroupProps) => {
   const { data: session } = useSession();
   const userId = session?.user?.id;
+  const router = useRouter();
 
   const [isOwner, setIsOwner] = useState(false);
   const [crs, setCrs] = useState<ChangeRequest[]>([]);
@@ -237,8 +241,9 @@ const Confirm = ({ group }: GroupProps) => {
         setDrafts([]);
         await loadCrs();
       } else if (res.status === 409 && data.status === "CONFLICT") {
-        toast.error(data.message ?? "Your branch conflicts with main.");
-        await loadCrs();
+        // Straight to the screen that settles it
+        toast.error(data.message ?? "Your changes conflict with the latest main.");
+        router.push(`/confirm-changes/${group}/resolve/${data.changeRequestId}`);
       } else {
         toast.error(data.error ?? "Failed to submit change request");
       }
@@ -261,7 +266,7 @@ const Confirm = ({ group }: GroupProps) => {
       if (res.ok) {
         toast.success("Merged into the default branch");
       } else if (data.status === "CONFLICT") {
-        toast.error("Now conflicts with main — the author must resync.");
+        toast.error("This now conflicts with main. Use Resolve conflicts to settle it, then merge.");
       } else {
         toast.error(data.error ?? "Merge failed");
       }
@@ -387,6 +392,15 @@ const Confirm = ({ group }: GroupProps) => {
                 >
                   Review diff
                 </button>
+              )}
+
+              {cr.status === "CONFLICT" && (isOwner || cr.authorId === userId) && (
+                <Link
+                  href={`/confirm-changes/${group}/resolve/${cr.id}`}
+                  className="rounded bg-amber-600 px-3 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                >
+                  Resolve conflicts
+                </Link>
               )}
 
               {isOwner && cr.status === "OPEN" && (

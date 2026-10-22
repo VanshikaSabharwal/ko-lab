@@ -174,6 +174,21 @@ Notes:
 - `next.config.mjs` allows `localhost:4566` as an image host and in the CSP, but only when
   `NODE_ENV !== "production"` — so the dev-only endpoint is never trusted in a deployed build.
 
+#### Storage tests
+
+`npm test` replaces storage with a stand-in, so it can't tell whether a file really gets stored
+and comes back. The storage tests run the same upload, draft and "Make it live" code against
+LocalStack:
+
+```bash
+cd apps/web
+npm run test:storage      # needs LocalStack running
+```
+
+They use their own buckets (`ko-lab-test-images`, `ko-lab-test-drafts`), created before the run
+and deleted after, so development data is untouched. They refuse to run against anything but a
+local endpoint.
+
 ### Build for Production
 
 ```bash

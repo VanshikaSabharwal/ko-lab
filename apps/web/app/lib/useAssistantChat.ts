@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 import toast from "react-hot-toast";
 import {
-  CREDITS_PER_CONVERSATION,
+  DAILY_CREDITS,
   type AssistantCredits,
 } from "./assistantCredits";
 
@@ -91,7 +91,7 @@ async function requestReply() {
         }));
       } else if (response.status === 404) {
         // Conversation no longer exists server-side; the next send starts fresh
-        setState((s) => ({ ...s, conversationId: null, credits: null, pending: false }));
+        setState((s) => ({ ...s, conversationId: null, pending: false }));
       } else {
         setState((s) => ({ ...s, pending: false }));
       }
@@ -114,6 +114,23 @@ async function requestReply() {
   }
 }
 
+// Stored credits can be from an earlier day or another tab, so ask the server
+// once per page load.
+let creditsRefreshed = false;
+
+async function refreshCredits() {
+  if (creditsRefreshed) return;
+  creditsRefreshed = true;
+  try {
+    const res = await fetch("/api/assistant");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.credits) setState((s) => ({ ...s, credits: data.credits }));
+  } catch {
+    // The next reply carries the count anyway
+  }
+}
+
 /**
  * Shared assistant chat state. Pass `resumePending` on the full-page chat so a
  * refresh mid-request asks again instead of leaving the question unanswered.
@@ -121,9 +138,13 @@ async function requestReply() {
 export function useAssistantChat({ resumePending = false } = {}) {
   const chat = useSyncExternalStore(subscribe, getState, () => EMPTY);
 
-  const creditsTotal = chat.credits?.total ?? CREDITS_PER_CONVERSATION;
-  const creditsRemaining = chat.credits?.remaining ?? CREDITS_PER_CONVERSATION;
+  const creditsTotal = chat.credits?.total ?? DAILY_CREDITS;
+  const creditsRemaining = chat.credits?.remaining ?? DAILY_CREDITS;
   const outOfCredits = creditsRemaining <= 0;
+
+  useEffect(() => {
+    void refreshCredits();
+  }, []);
 
   useEffect(() => {
     if (!resumePending) return;
@@ -138,7 +159,7 @@ export function useAssistantChat({ resumePending = false } = {}) {
   const send = useCallback((text: string) => {
     const content = text.trim();
     const s = getState();
-    const noCredits = (s.credits?.remaining ?? CREDITS_PER_CONVERSATION) <= 0;
+    const noCredits = (s.credits?.remaining ?? DAILY_CREDITS) <= 0;
     if (!content || s.loading || noCredits) return false;
 
     setState((prev) => ({
@@ -150,7 +171,11 @@ export function useAssistantChat({ resumePending = false } = {}) {
     return true;
   }, []);
 
-  const startNewChat = useCallback(() => setState(() => EMPTY), []);
+  // The allowance is per day, not per chat, so it carries over
+  const startNewChat = useCallback(
+    () => setState((s) => ({ ...EMPTY, credits: s.credits })),
+    [],
+  );
 
   return {
     messages: chat.messages,

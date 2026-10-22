@@ -22,8 +22,41 @@ export interface MemberAddedEvent {
   inviteeName: string;
 }
 
+/**
+ * A group call's log line. One row per thing that happened, so the chat reads
+ * as a history of the call: who started it, who came and went, how long it ran.
+ */
+export interface CallEvent {
+  type: "call";
+  action: "started" | "joined" | "left" | "ended";
+  actorId: string;
+  actorName: string;
+  /** For "ended": how long the call ran. */
+  durationMs?: number;
+}
+
 export function isSystemMessage(message: string): boolean {
   return message.startsWith(SYSTEM_MESSAGE_PREFIX);
+}
+
+export function callEventMessage(event: Omit<CallEvent, "type">): string {
+  const payload: CallEvent = { type: "call", ...event };
+  return `${SYSTEM_MESSAGE_PREFIX}${JSON.stringify(payload)}`;
+}
+
+/** True for a call log line, as opposed to a membership announcement. */
+export function isCallEvent(message: string): boolean {
+  return parseEvent(message.slice(SYSTEM_MESSAGE_PREFIX.length))?.type === "call";
+}
+
+/** "45 sec", "12 min", "1 hr 5 min". */
+export function formatCallLength(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) return `${seconds} sec`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const rest = minutes % 60;
+  return rest ? `${Math.floor(minutes / 60)} hr ${rest} min` : `${Math.floor(minutes / 60)} hr`;
 }
 
 export function memberAddedMessage(event: Omit<MemberAddedEvent, "type">): string {
@@ -31,11 +64,11 @@ export function memberAddedMessage(event: Omit<MemberAddedEvent, "type">): strin
   return `${SYSTEM_MESSAGE_PREFIX}${JSON.stringify(payload)}`;
 }
 
-function parseEvent(body: string): MemberAddedEvent | null {
+function parseEvent(body: string): MemberAddedEvent | CallEvent | null {
   if (!body.startsWith("{")) return null;
   try {
     const event = JSON.parse(body);
-    return event?.type === "member_added" ? event : null;
+    return event?.type === "member_added" || event?.type === "call" ? event : null;
   } catch {
     return null;
   }
@@ -58,6 +91,22 @@ interface Viewer {
 export function systemMessageText(message: string, { viewerId, senderId }: Viewer = {}): string {
   const body = message.slice(SYSTEM_MESSAGE_PREFIX.length);
   const event = parseEvent(body);
+
+  if (event?.type === "call") {
+    const actor = viewerId && event.actorId === viewerId ? "You" : event.actorName;
+    switch (event.action) {
+      case "started":
+        return `${actor} started a call`;
+      case "joined":
+        return `${actor} joined the call`;
+      case "left":
+        return `${actor} left the call`;
+      case "ended":
+        return event.durationMs !== undefined
+          ? `Call ended · ${formatCallLength(event.durationMs)}`
+          : "Call ended";
+    }
+  }
 
   if (event) {
     const actorIsViewer = !!viewerId && event.actorId === viewerId;

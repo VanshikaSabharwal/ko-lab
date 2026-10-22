@@ -119,7 +119,8 @@ describe("PUT /api/calls/[id]/accept", () => {
     await PUT(makeRequest("call-1"), { params: { id: "call-1" } });
     expect(mockPrisma.callParticipant.updateMany).toHaveBeenCalledWith({
       where: { callId: "call-1", userId: "user-2" },
-      data: { joinedAt: expect.any(Date) },
+      // leftAt is cleared too: accepting after having left is a rejoin
+      data: { joinedAt: expect.any(Date), leftAt: null },
     });
   });
 });

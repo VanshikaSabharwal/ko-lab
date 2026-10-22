@@ -4,12 +4,16 @@ import React from "react";
 import { X } from "lucide-react";
 import { getFileIcon } from "../lib/fileTypes";
 import { cn } from "../../../../lib/utils";
+import FileActivityBadge from "./FileActivityBadge";
+import type { FileActivity } from "../lib/useFileActivity";
 
 interface EditorTabsProps {
   openFiles: string[];
   activePath: string;
   /** Paths with unsaved edits — shown as a dot instead of the close X. */
   dirtyPaths?: Set<string>;
+  /** Who else has each file open. */
+  activity?: Map<string, FileActivity[]>;
   onSelect: (path: string) => void;
   onClose: (path: string) => void;
   /** Pinned to the right of the tab strip, outside its horizontal scroll. */
@@ -20,6 +24,7 @@ export default function EditorTabs({
   openFiles,
   activePath,
   dirtyPaths,
+  activity,
   onSelect,
   onClose,
   actions,
@@ -51,6 +56,7 @@ export default function EditorTabs({
             >
               <span className={cn("shrink-0", color)}>{icon}</span>
               <span className="max-w-[10rem] truncate">{name}</span>
+              <FileActivityBadge people={activity?.get(path)} />
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -63,7 +69,7 @@ export default function EditorTabs({
                     closed by reflex. */}
                 {isDirty ? (
                   <>
-                    <span className="block h-2 w-2 rounded-full bg-blue-500 group-hover:hidden" />
+                    <span className="block h-2 w-2 rounded-full bg-gray-100 group-hover:hidden" />
                     <X size={13} className="hidden group-hover:block" />
                   </>
                 ) : (

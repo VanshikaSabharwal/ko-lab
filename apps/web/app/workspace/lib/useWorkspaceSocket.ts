@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchWsToken } from "../../lib/wsAuth";
 
-export type WorkspaceBoardType = "MIND_MAP" | "PLANNING" | "DB_SCHEMA" | "UI_DESIGN";
+// CODE is the code editor's room: who has which file open
+export type WorkspaceBoardType = "MIND_MAP" | "PLANNING" | "DB_SCHEMA" | "UI_DESIGN" | "CODE";
 
 // How long live sync must stay down before the UI says anything.
 const OFFLINE_GRACE_MS = 10_000;
@@ -12,7 +13,8 @@ interface UseWorkspaceSocketOptions {
   groupId: string;
   board: WorkspaceBoardType;
   userId: string | undefined;
-  onRemoteOp: (op: any) => void;
+  /** `fromUserId` is who sent it, as the server stamped it (not the sender's say-so). */
+  onRemoteOp: (op: any, fromUserId?: string) => void;
 }
 
 // Mirrors the WS connection lifecycle used by GroupChat.tsx (ping/reconnect/cleanup),
@@ -70,7 +72,7 @@ export function useWorkspaceSocket({ groupId, board, userId, onRemoteOp }: UseWo
           return;
         }
         if (message.type === "workspace_op") {
-          onRemoteOpRef.current(message.op);
+          onRemoteOpRef.current(message.op, message.userId);
         }
       };
 

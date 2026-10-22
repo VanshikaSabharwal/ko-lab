@@ -156,7 +156,7 @@ export function ChatActions({ chat }: { chat: Chat }) {
   return (
     <div className="ml-auto flex items-center gap-2">
       <span
-        title="Each message you send uses 1 credit. Start a new chat for a fresh set."
+        title={`Each message you send uses 1 credit. You get ${creditsTotal} a day; they reset at midnight UTC.`}
         className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${
           outOfCredits
             ? "border-red-300 bg-red-50 text-red-700 dark:border-red-500/40 dark:bg-red-500/10 dark:text-red-300"
@@ -166,7 +166,7 @@ export function ChatActions({ chat }: { chat: Chat }) {
         }`}
       >
         <Coins className="w-3 h-3" />
-        {creditsRemaining}/{creditsTotal} credits
+        {creditsRemaining}/{creditsTotal} credits today
       </span>
       {chat.messages.length > 0 && (
         <button
@@ -268,7 +268,7 @@ export function AssistantMessageList({
   );
 }
 
-/** Input row — replaced by a restart prompt once the credits are spent. */
+/** Input row — replaced by a notice once today's credits are spent. */
 export function AssistantComposer({
   chat,
   onSubmit,
@@ -288,18 +288,10 @@ export function AssistantComposer({
 
   if (chat.outOfCredits) {
     return (
-      <div className="p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30 flex items-center justify-between gap-3">
+      <div className="p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/30">
         <p className="text-xs text-gray-600 dark:text-gray-400">
-          You&apos;ve used all {chat.creditsTotal} credits in this chat.
+          You&apos;ve used all {chat.creditsTotal} of today&apos;s credits. They reset at midnight UTC.
         </p>
-        <button
-          type="button"
-          onClick={chat.startNewChat}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:opacity-90 transition"
-        >
-          <Plus className="w-3 h-3" />
-          New chat
-        </button>
       </div>
     );
   }

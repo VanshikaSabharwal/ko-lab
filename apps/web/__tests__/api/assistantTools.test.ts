@@ -10,9 +10,12 @@ vi.mock("../../app/lib/prisma", () => ({
   default: {
     assistantConversation: {
       create: vi.fn(async () => ({ id: "conv1" })),
-      findFirst: vi.fn(async () => ({ creditsTotal: 15 })),
+      findFirst: vi.fn(async () => ({ id: "conv1" })),
+    },
+    assistantDailyUsage: {
+      createMany: vi.fn(async () => ({ count: 1 })),
       updateMany: vi.fn(async () => ({ count: 1 })),
-      findUniqueOrThrow: vi.fn(async () => ({ creditsTotal: 15, creditsUsed: 1 })),
+      findUnique: vi.fn(async () => ({ used: 1 })),
     },
     planningTask: { findFirst: vi.fn() },
   },

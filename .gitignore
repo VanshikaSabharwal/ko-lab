@@ -36,3 +36,9 @@ yarn-error.log*
 # Misc
 .DS_Store
 *.pem
+
+# Promptera: generated context cache (local, rebuildable)
+.ai-context/manifest.json
+.ai-context/edges.json
+.ai-context/files/
+# overrides.json is intentionally NOT ignored — it is your curated context.

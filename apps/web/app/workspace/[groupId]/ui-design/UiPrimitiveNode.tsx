@@ -30,7 +30,13 @@ export interface UiPrimitiveData {
   radius?: number;
   fontSize?: number;
   opacity?: number;
+  /** Uploaded picture for an image element. */
+  src?: string;
+  /** True while this element's picture is uploading. */
+  uploading?: boolean;
   onChange: (label: string) => void;
+  /** Opens the file picker to set this element's picture. */
+  onPickImage?: () => void;
 }
 
 export interface PaletteItem {
@@ -166,62 +172,72 @@ function TabStrip({ text }: { text: string }) {
   );
 }
 
+// Kinds with no text at all: their content is drawn, not labelled
+const NOT_EDITABLE: UiKind[] = ["divider", "table", "chart"];
+
+/** Placeholder shown while editing a kind with no default text. */
+const EDIT_PLACEHOLDER: Partial<Record<UiKind, string>> = {
+  checkbox: "Label",
+  toggle: "Label",
+  navbar: "Brand",
+  image: "Image caption",
+  avatar: "Name or initials",
+};
+
 /**
- * Shows the label as plain text so a press anywhere on the element drags it;
- * double-click switches to an input. An always-on input covered the whole
- * element and, being `nodrag`, made buttons, badges and text impossible to move.
+ * The text editor that replaces an element's label while editing. Opened by a
+ * double-click anywhere on the element (see UiPrimitiveNode), not just on the
+ * text: an unnamed toggle or checkbox has no text to hit, which left them
+ * uneditable.
  */
-function EditableLabel({
+function LabelInput({
   kind,
   value,
-  onChange,
+  onDone,
+  className,
+}: {
+  kind: UiKind;
+  value: string;
+  /** null = cancelled */
+  onDone: (label: string | null) => void;
+  className: string;
+}) {
+  const [draft, setDraft] = useState(value);
+  return (
+    <input
+      autoFocus
+      onFocus={(e) => e.currentTarget.select()}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => onDone(draft)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onDone(draft);
+        if (e.key === "Escape") onDone(null);
+      }}
+      placeholder={DEFAULT_TEXT[kind]?.text ?? EDIT_PLACEHOLDER[kind] ?? "Text"}
+      // nodrag/nopan/nowheel: selecting text mustn't move the element or the board
+      className={`nodrag nopan nowheel min-w-0 rounded-sm bg-gray-900/80 text-white outline-none ring-2 ring-blue-500 ${className}`}
+    />
+  );
+}
+
+/** The label as plain text, so a press anywhere on the element still drags it. */
+function LabelText({
+  kind,
+  value,
   className,
   display,
 }: {
   kind: UiKind;
   value: string;
-  onChange: (label: string) => void;
   className: string;
-  /** Custom rendering of the (non-editing) text, e.g. tabs from a list. */
+  /** Custom rendering, e.g. tabs from a comma-separated list. */
   display?: (text: string) => React.ReactNode;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
   const fallback = DEFAULT_TEXT[kind];
-
-  const finish = (commit: boolean) => {
-    if (commit && draft !== value) onChange(draft);
-    setEditing(false);
-  };
-
-  if (editing) {
-    return (
-      <input
-        autoFocus
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => finish(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") finish(true);
-          if (e.key === "Escape") finish(false);
-        }}
-        placeholder={fallback?.text}
-        className={`nodrag bg-transparent outline-none ring-1 ring-blue-400/60 ${className}`}
-      />
-    );
-  }
-
   const shown = value || fallback?.text || "";
   return (
-    <span
-      onDoubleClick={(e) => {
-        e.stopPropagation();
-        setDraft(value);
-        setEditing(true);
-      }}
-      title="Double-click to edit text"
-      className={`truncate ${!value && fallback?.muted ? "opacity-50" : ""} ${className}`}
-    >
+    <span className={`truncate ${!value && fallback?.muted ? "opacity-50" : ""} ${className}`}>
       {display ? display(shown) : shown}
     </span>
   );
@@ -231,6 +247,21 @@ export default function UiPrimitiveNode({ data, selected }: NodeProps) {
   const d = data as unknown as UiPrimitiveData;
   const isCornerLabel = CORNER_LABELED.includes(d.kind);
   const isDecorative = DECORATIVE.includes(d.kind);
+  const editable = !NOT_EDITABLE.includes(d.kind);
+  const [editing, setEditing] = useState(false);
+
+  const labelClass = isCornerLabel
+    ? "absolute left-2 top-1 w-2/3 text-[11px] text-gray-400"
+    : d.kind === "dropdown" || d.kind === "checkbox" || d.kind === "toggle" || d.kind === "navbar"
+      ? "min-w-0 flex-1 px-1"
+      : d.kind === "text"
+        ? "block w-full px-2"
+        : "block w-full px-2 text-center";
+
+  const finishEditing = (label: string | null) => {
+    if (label !== null && label !== d.label) d.onChange(label);
+    setEditing(false);
+  };
 
   const style: React.CSSProperties = {
     backgroundColor: d.fill || undefined,
@@ -240,7 +271,27 @@ export default function UiPrimitiveNode({ data, selected }: NodeProps) {
   };
 
   return (
-    <div className={`relative h-full w-full ${KIND_CLASSES[d.kind]}`} style={style}>
+    <div
+      className={`relative h-full w-full ${KIND_CLASSES[d.kind]}`}
+      style={style}
+      title={
+        d.kind === "image" && d.onPickImage
+          ? d.src
+            ? "Double-click to replace the image"
+            : "Double-click to upload an image"
+          : editable && !editing
+            ? "Double-click to edit text"
+            : undefined
+      }
+      onDoubleClick={(e) => {
+        if (!editable || editing) return;
+        // Also keeps React Flow from zooming the board on this double-click
+        e.stopPropagation();
+        // An image's content is its picture; its caption is edited in the side panel
+        if (d.kind === "image" && d.onPickImage) return d.onPickImage();
+        setEditing(true);
+      }}
+    >
       <NodeResizer isVisible={selected} minWidth={24} minHeight={8} />
 
       {d.kind === "checkbox" && <span className="h-3.5 w-3.5 shrink-0 rounded-sm border border-gray-500" />}
@@ -251,31 +302,49 @@ export default function UiPrimitiveNode({ data, selected }: NodeProps) {
       )}
       {d.kind === "navbar" && <span className="h-3 w-3 shrink-0 rounded-sm bg-gray-500" />}
 
-      {isDecorative ? (
+      {editing ? (
+        <LabelInput
+          kind={d.kind}
+          value={d.label}
+          onDone={finishEditing}
+          className={
+            // Image/avatar/tabs have no text slot of their own: edit over the whole element
+            isDecorative || d.kind === "tabs"
+              ? "absolute inset-x-1 top-1/2 z-10 -translate-y-1/2 px-1.5 py-0.5 text-center text-xs"
+              : `${labelClass} py-0.5`
+          }
+        />
+      ) : d.kind === "image" && (d.src || d.uploading) ? (
+        <>
+          {d.src && (
+            // A plain <img>: the picture lives in the group's storage bucket, and
+            // the PNG export needs a real element to capture.
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={d.src}
+              alt={d.label || "Uploaded image"}
+              draggable={false}
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{ borderRadius: "inherit" }}
+            />
+          )}
+          {d.uploading && (
+            <span className="absolute inset-0 flex items-center justify-center bg-black/50 text-xs text-white">
+              Uploading…
+            </span>
+          )}
+        </>
+      ) : isDecorative ? (
         <DecorativeContent kind={d.kind} label={d.label} />
       ) : d.kind === "tabs" ? (
-        <EditableLabel
+        <LabelText
           kind="tabs"
           value={d.label}
-          onChange={d.onChange}
           className="flex h-full w-full items-end gap-1"
           display={(text) => <TabStrip text={text} />}
         />
       ) : (
-        <EditableLabel
-          kind={d.kind}
-          value={d.label}
-          onChange={d.onChange}
-          className={
-            isCornerLabel
-              ? "absolute left-2 top-1 w-2/3 text-[11px] text-gray-400"
-              : d.kind === "dropdown" || d.kind === "checkbox" || d.kind === "toggle" || d.kind === "navbar"
-                ? "min-w-0 flex-1 px-1"
-                : d.kind === "text"
-                  ? "block w-full px-2"
-                  : "block w-full px-2 text-center"
-          }
-        />
+        <LabelText kind={d.kind} value={d.label} className={labelClass} />
       )}
       {d.kind === "dropdown" && <span className="shrink-0 text-gray-500">▾</span>}
     </div>

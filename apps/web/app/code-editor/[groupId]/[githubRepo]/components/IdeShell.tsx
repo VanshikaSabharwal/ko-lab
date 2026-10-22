@@ -1,6 +1,7 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
+import { ideThemeVars, type EditorThemeOption } from "../lib/ideSettings";
 import Link from "next/link";
 import { signOut } from "next-auth/react";
 import {
@@ -11,6 +12,8 @@ import { cn } from "../../../../lib/utils";
 export type IdeSection = "files" | "terminal" | "collaboration" | "trash" | "settings";
 
 interface IdeShellProps {
+  /** The editor theme; the shell colours the whole IDE from it. */
+  theme: EditorThemeOption;
   repo: string;
   section: IdeSection;
   onSectionChange: (s: IdeSection) => void;
@@ -40,10 +43,22 @@ const NAV: { key: IdeSection; label: string; short: string; icon: typeof Folder 
 export default function IdeShell({
   repo, section, onSectionChange, search, onSearchChange,
   explorer, children, onOpenAi, menuOpen, onMenuOpenChange,
-  trashWarningCount = 0, onNewFile,
+  trashWarningCount = 0, onNewFile, theme,
 }: IdeShellProps) {
+  const themeVars = useMemo(() => ideThemeVars(theme), [theme]);
   return (
-    <div className="flex h-[100dvh] flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-white">
+    // The whole IDE follows the editor theme. `dark` selects the dark-mode
+    // layout whatever the site's own mode is, and the variables re-colour its
+    // greys from the theme (light themes included: see globals.css).
+    // `contents` keeps this wrapper out of the layout.
+    <div
+      className="ide-themed dark contents"
+      data-ide-light={!theme.dark}
+      style={themeVars as React.CSSProperties}
+    >
+    {/* The site header (h-14 plus its 1px border) sits above this, so a full
+        100dvh would push the status bar and mobile tabs below the fold. */}
+    <div className="flex h-[calc(100dvh-57px)] flex-col bg-white text-gray-900 dark:bg-gray-950 dark:text-white">
       {/* Top nav */}
       <header className="flex shrink-0 items-center gap-3 border-b border-gray-200 px-3 py-2 dark:border-gray-800">
         <button
@@ -127,27 +142,9 @@ export default function IdeShell({
             </Link>
           </div>
 
-          <nav className="px-2">
-            {NAV.map(({ key, label, icon: Icon }) => (
-              <button
-                key={key}
-                onClick={() => { onSectionChange(key); onMenuOpenChange(false); }}
-                className={cn(
-                  "mb-0.5 flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
-                  section === key
-                    ? "bg-blue-600/10 font-medium text-blue-700 dark:bg-blue-600/20 dark:text-blue-300"
-                    : "text-gray-600 hover:bg-gray-200/70 dark:text-gray-400 dark:hover:bg-gray-800",
-                )}
-              >
-                <Icon size={16} /> {label}
-                {key === "trash" && trashWarningCount > 0 && (
-                  <NavBadge n={trashWarningCount} />
-                )}
-              </button>
-            ))}
-          </nav>
-
-          <div className="mt-4 flex items-center justify-between pb-1 pl-4 pr-2">
+          {/* The sections (Files, Terminal…) live in the top bar, and in the
+              bottom tab bar on phones; the sidebar is just the explorer. */}
+          <div className="mt-1 flex items-center justify-between pb-1 pl-4 pr-2">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-400">
               Project explorer
             </p>
@@ -207,6 +204,7 @@ export default function IdeShell({
           </button>
         ))}
       </nav>
+    </div>
     </div>
   );
 }

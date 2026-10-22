@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSession } from "next-auth/react";
 import { useTheme } from "next-themes";
 import { Menu, Search, Moon, Sun, Check, Loader2, WifiOff } from "lucide-react";
-import Avatar, { type AvatarUser } from "./Avatar";
+import type { AvatarUser } from "./Avatar";
 import AvatarStack from "./AvatarStack";
 import { cn } from "../../lib/utils";
 
@@ -79,6 +79,11 @@ export default function WorkspaceTopBar({
 }: WorkspaceTopBarProps) {
   const { data: session } = useSession();
   const { resolvedTheme, setTheme } = useTheme();
+  // The server can't know the visitor's theme, so it and the browser would
+  // draw different icons and React would discard the whole server-rendered
+  // page (a hydration error). Decide the icon only once mounted.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const searchRef = useRef<HTMLInputElement>(null);
   // Below lg: the search box is collapsed behind an icon — the top bar has no
   // room for it there. Opening it is what makes ⌘K reachable on small screens,
@@ -110,6 +115,7 @@ export default function WorkspaceTopBar({
     name: session?.user?.name ?? null,
     image: session?.user?.image ?? null,
   };
+  const others = presentMembers.filter((m) => m.id !== user.id);
 
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-gray-200 bg-white px-3 py-2.5 dark:border-gray-800 dark:bg-gray-950 sm:px-4">
@@ -185,21 +191,23 @@ export default function WorkspaceTopBar({
       </button>
 
       <div className="flex shrink-0 items-center gap-2">
-        {presentMembers.length > 0 && (
-          <AvatarStack users={presentMembers} size={26} max={3} />
-        )}
+        {/* Who else is on the board. Your own picture says nothing you don't know. */}
+        {others.length > 0 && <AvatarStack users={others} size={26} max={3} />}
 
         <button
           onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
           aria-label="Toggle theme"
           className="rounded p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
         >
-          {resolvedTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          {mounted && resolvedTheme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
         </button>
 
-        <Link href="/profile" className="flex items-center gap-2 rounded-md px-1 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800">
-          <Avatar user={user} size={28} />
-          <span className="hidden leading-tight sm:block">
+        <Link
+          href="/profile"
+          title="Your profile"
+          className="hidden rounded-md px-1.5 py-0.5 hover:bg-gray-100 dark:hover:bg-gray-800 sm:block"
+        >
+          <span className="block leading-tight">
             <span className="block max-w-[9rem] truncate text-xs font-semibold text-gray-900 dark:text-white">
               {user.name ?? "You"}
             </span>

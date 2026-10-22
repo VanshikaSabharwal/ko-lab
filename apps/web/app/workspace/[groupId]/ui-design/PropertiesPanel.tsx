@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { Node } from "@xyflow/react";
-import { Copy, Trash2, ArrowUpToLine, ArrowDownToLine } from "lucide-react";
+import { Copy, Trash2, ArrowUpToLine, ArrowDownToLine, ImageUp } from "lucide-react";
 import type { UiPrimitiveData } from "./UiPrimitiveNode";
 
 interface PropertiesPanelProps {
@@ -11,6 +11,10 @@ interface PropertiesPanelProps {
   onPatchNode: (id: string, patch: Partial<Node>) => void;
   onDuplicate: () => void;
   onDelete: () => void;
+  /** Opens the file picker for an image element. */
+  onPickImage: (id: string) => void;
+  /** The selected element's picture is uploading. */
+  uploading: boolean;
 }
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
@@ -31,6 +35,8 @@ export default function PropertiesPanel({
   onPatchNode,
   onDuplicate,
   onDelete,
+  onPickImage,
+  uploading,
 }: PropertiesPanelProps) {
   if (!node) {
     return (
@@ -52,13 +58,35 @@ export default function PropertiesPanel({
         {d.kind}
       </p>
 
-      <Row label="Label">
+      <Row label={d.kind === "image" ? "Caption" : "Label"}>
         <input
           value={d.label ?? ""}
           onChange={(e) => onPatchData(node.id, { label: e.target.value })}
           className={`${inputCls} w-28 text-left`}
         />
       </Row>
+
+      {d.kind === "image" && (
+        <div className="flex flex-col gap-1.5">
+          <button
+            onClick={() => onPickImage(node.id)}
+            disabled={uploading}
+            className="flex items-center justify-center gap-1.5 rounded border border-blue-500/60 bg-blue-600/10 px-2 py-1.5 text-xs text-blue-700 hover:bg-blue-600/20 disabled:opacity-50 dark:text-blue-300"
+          >
+            <ImageUp size={13} />
+            {uploading ? "Uploading…" : d.src ? "Replace image" : "Upload image"}
+          </button>
+          {d.src && !uploading && (
+            <button
+              onClick={() => onPatchData(node.id, { src: null })}
+              className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-200 hover:text-gray-800 dark:hover:bg-gray-700 dark:hover:text-gray-200"
+            >
+              Remove image
+            </button>
+          )}
+          <p className="text-[10px] leading-snug text-gray-500">PNG, JPEG or WebP, up to 5 MB.</p>
+        </div>
+      )}
 
       <Row label="Fill">
         <span className="flex items-center gap-1.5">

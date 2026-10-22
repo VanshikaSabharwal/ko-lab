@@ -39,6 +39,22 @@ export async function ensureLiveKitRoom(roomName: string) {
   }
 }
 
+/**
+ * Identities (user ids) connected to a room right now. This is the source of
+ * truth for "is anyone still on this call": the database only knows what the
+ * app was told, and misses a closed tab or a dropped connection. A room that
+ * no longer exists has nobody in it.
+ */
+export async function listRoomIdentities(roomName: string): Promise<string[]> {
+  try {
+    const participants = await roomService.listParticipants(roomName);
+    return participants.map((p) => p.identity);
+  } catch (err: any) {
+    if (err?.status === 404 || err?.code === "not_found") return [];
+    throw err;
+  }
+}
+
 export async function deleteLiveKitRoom(roomName: string) {
   try {
     await roomService.deleteRoom(roomName);

@@ -38,20 +38,20 @@ model User {
   accounts Account[]
   sessions Session[]
 
-  authoredChangeRequests ChangeRequest[]    @relation("AuthoredChangeRequests")
-  bugReports             BugReport[]        @relation("UserBugReports")
-  planningAssignments    PlanningAssignee[] @relation("UserPlanningAssignments")
+  authoredChangeRequests ChangeRequest[]         @relation("AuthoredChangeRequests")
+  bugReports             BugReport[]             @relation("UserBugReports")
+  planningAssignments    PlanningAssignee[]      @relation("UserPlanningAssignments")
   assistantConversations AssistantConversation[] @relation("UserAssistantConversations")
+  assistantDailyUsage    AssistantDailyUsage[]   @relation("UserAssistantDailyUsage")
 
   // Add timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
-// One Ko-Lab Assistant chat. Each user message spends one credit; when the
-// allowance is used up the user starts a new conversation. creditsTotal is
-// stored per row so changing the default doesn't alter conversations already
-// in progress.
+// One Ko-Lab Assistant chat. Credits are counted per user per day in
+// AssistantDailyUsage; creditsTotal/creditsUsed are left over from when each
+// conversation had its own allowance and are no longer read.
 model AssistantConversation {
   id           String   @id @default(cuid())
   userId       String
@@ -63,6 +63,19 @@ model AssistantConversation {
   user User @relation("UserAssistantConversations", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+// Assistant messages a user has sent on one UTC day. Every chat draws on the
+// same row, so starting a new conversation doesn't refill the allowance.
+model AssistantDailyUsage {
+  userId String
+  // UTC date, YYYY-MM-DD
+  day    String
+  used   Int    @default(0)
+
+  user User @relation("UserAssistantDailyUsage", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, day])
 }
 
 // === NEXTAUTH MODELS ===
@@ -420,7 +433,7 @@ enum CodeAccessStatus {
 }
 
 model Invite {
-  id String @id @default(cuid())
+  id        String   @id @default(cuid())
   // Exactly one of phone/email identifies the invitee, depending on which the
   // inviter typed. Both are optional so either kind of invite can be stored.
   phone     String?

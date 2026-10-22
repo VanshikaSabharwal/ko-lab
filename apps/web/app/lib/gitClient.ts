@@ -40,8 +40,18 @@ async function call<T = unknown>(
     body: JSON.stringify(body),
   });
   if (res.ok) return (await res.json()) as T;
-  const err = await res.json().catch(() => ({}));
-  throw new Error((err as { error?: string }).error || "Git service error");
+  const err = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+  throw new GitServiceError(err.error || "Git service error", err.code);
+}
+
+/** A git service failure, with its machine-readable code when it sent one. */
+export class GitServiceError extends Error {
+  constructor(
+    message: string,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
 }
 
 async function repoUrlFor(groupId: string): Promise<string> {

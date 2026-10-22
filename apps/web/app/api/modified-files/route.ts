@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import prisma from "../../lib/prisma";
 import { getSessionUser, unauthorized, requireCodeAccess } from "../../lib/apiAuth";
-import { writeDraft, draftContentFor } from "../../lib/draftStore";
+import { writeDraft, deleteDraft, draftContentFor } from "../../lib/draftStore";
 
 export async function POST(req: Request) {
   const me = await getSessionUser();
@@ -105,5 +105,34 @@ export async function GET(req: Request) {
       { Error: "Failed to fetch files" },
       { status: 500 },
     );
+  }
+}
+
+/**
+ * Discard the caller's own draft of a file: the stored text and its row. For a
+ * file they created, that removes it altogether; for a repo file, it puts them
+ * back on the repo's version. Staged deletions are left to /api/delete-file.
+ */
+export async function DELETE(req: Request) {
+  const me = await getSessionUser();
+  if (!me) return unauthorized();
+
+  const { path, group } = await req.json();
+  if (!path || !group) {
+    return NextResponse.json({ error: "path and group are required" }, { status: 400 });
+  }
+
+  const gate = await requireCodeAccess(group, me.id);
+  if (!gate.ok) return gate.res;
+
+  try {
+    await deleteDraft(group, me.id, path);
+    await prisma.modifiedFiles.deleteMany({
+      where: { userId: me.id, groupId: group, path, deleted: false },
+    });
+    return NextResponse.json({ discarded: true }, { status: 200 });
+  } catch (error) {
+    console.error("Error discarding draft: ", error);
+    return NextResponse.json({ error: "Failed to discard the file" }, { status: 500 });
   }
 }

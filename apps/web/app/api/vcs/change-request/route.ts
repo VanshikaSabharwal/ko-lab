@@ -120,7 +120,7 @@ export async function POST(req: Request) {
           changeRequestId: cr.id,
           status: "CONFLICT",
           message:
-            "Your branch conflicts with the latest main. Pull the newest files into your draft and resubmit.",
+            "Your changes conflict with the latest main. Choose what to keep for the conflicting lines.",
         },
         { status: 409 },
       );
@@ -166,6 +166,7 @@ export async function GET(req: Request) {
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
+      authorId: true,
       title: true,
       branchName: true,
       prNumber: true,

@@ -1,22 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { javascript } from "@codemirror/lang-javascript";
-import { python } from "@codemirror/lang-python";
-import { html } from "@codemirror/lang-html";
-import { java } from "@codemirror/lang-java";
-import { css } from "@codemirror/lang-css";
-import { json } from "@codemirror/lang-json";
-import { markdown } from "@codemirror/lang-markdown";
-import { xml } from "@codemirror/lang-xml";
-import { yaml } from "@codemirror/lang-yaml";
-import { rust } from "@codemirror/lang-rust";
-import { php } from "@codemirror/lang-php";
-import { sql } from "@codemirror/lang-sql";
-import { cpp } from "@codemirror/lang-cpp";
-import { type Extension, Prec } from "@codemirror/state";
+import { Prec } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
 import { hasLinter } from "./lib/fileTypes";
+import { useFileLanguage } from "./lib/languages";
 import CodeMirror from "@uiw/react-codemirror";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
 import toast from "react-hot-toast";
@@ -32,7 +20,17 @@ import CollaborationPanel from "./components/CollaborationPanel";
 import TrashPanel, { type TrashItem } from "./components/TrashPanel";
 import OutputPanel from "./components/OutputPanel";
 import SettingsPanel from "./components/SettingsPanel";
-import { useIdeSettings } from "./lib/ideSettings";
+import FileActivityBadge, { describeActivity } from "./components/FileActivityBadge";
+import { useFileActivity } from "./lib/useFileActivity";
+import { useCoEditing, type CoEditing } from "./lib/coEditing/useCoEditing";
+import {
+  DEFAULT_IDE_SETTINGS,
+  readRepoPrefs,
+  readStoredIdeSettings,
+  useIdeSettings,
+  writeRepoPrefs,
+} from "./lib/ideSettings";
+import { formatSource } from "./lib/format";
 import { useTheme } from "next-themes";
 import LiveSiteControl from "./components/LiveSiteControl";
 import { useLivePreview } from "./lib/useLivePreview";
@@ -42,142 +40,27 @@ import { useCodeRunner } from "../../../lib/codeRunner/useCodeRunner";
 import { getRunLanguage } from "../../../lib/codeRunner/paths";
 import LargeFileViewer from "./LargeFileViewer";
 import ImagePreview from "./ImagePreview";
-import { Bot } from "lucide-react";
+import FileTree from "./components/FileTree";
+import BranchMenu, { type Branch } from "./components/BranchMenu";
 import {
-  FileText,
-  Sparkles,
-  X,
-  Folder,
-  FolderOpen,
-  FileCode,
-  FileJson,
-  ChevronRight,
-  ChevronDown,
-  File,
-  GitBranch,
-  Trash2,
-  Undo2,
-  Play,
-  Square,
-} from "lucide-react";
+  buildFileTree,
+  findFileInTree,
+  type CodeFile,
+  type TreeNode,
+} from "./lib/fileTypes";
+import { Bot, FileCode, X, Play, Square } from "lucide-react";
 
 interface CodeProps {
   github: string;
   group: string;
 }
 
-interface CodeFile {
-  name: string;
-  path: string;
-  sha: string;
-  size: number;
-  url: string;
-  content?: string;
-  _generated?: boolean;
-}
+// Kept at module scope: a new value each render makes CodeMirror rebuild its
+// whole configuration on every keystroke.
+const LINT_GUTTER = lintGutter();
 
-interface TreeNode {
-  name: string;
-  path: string;
-  type: "file" | "folder";
-  children: TreeNode[];
-  file?: CodeFile;
-}
-
-const EXTENSION_MAP: Record<string, () => Extension> = {
-  ".js": javascript,
-  ".jsx": () => javascript({ jsx: true }),
-  ".ts": () => javascript({ typescript: true }),
-  ".tsx": () => javascript({ jsx: true, typescript: true }),
-  ".mjs": javascript,
-  ".cjs": javascript,
-  ".py": python,
-  ".pyw": python,
-  ".java": java,
-  ".html": html,
-  ".htm": html,
-  ".css": css,
-  ".scss": css,
-  ".sass": css,
-  ".less": css,
-  ".json": json,
-  ".jsonc": json,
-  ".md": markdown,
-  ".mdx": markdown,
-  ".xml": xml,
-  ".svg": xml,
-  ".yaml": yaml,
-  ".yml": yaml,
-  ".rs": rust,
-  ".php": php,
-  ".phtml": php,
-  ".sql": sql,
-  ".c": cpp,
-  ".cpp": cpp,
-  ".h": cpp,
-  ".hpp": cpp,
-  ".cs": cpp,
-  ".go": () => javascript({ typescript: true }),
-  ".rb": python,
-  ".vue": html,
-  ".svelte": html,
-  ".astro": html,
-};
-
-const FILE_ICON_MAP: Record<
-  string,
-  { icon: React.ReactNode; color: string }
-> = {
-  ".js": { icon: <FileCode size={15} />, color: "text-yellow-400" },
-  ".jsx": { icon: <FileCode size={15} />, color: "text-cyan-400" },
-  ".ts": { icon: <FileCode size={15} />, color: "text-blue-400" },
-  ".tsx": { icon: <FileCode size={15} />, color: "text-blue-500" },
-  ".mjs": { icon: <FileCode size={15} />, color: "text-yellow-400" },
-  ".cjs": { icon: <FileCode size={15} />, color: "text-yellow-400" },
-  ".py": { icon: <FileCode size={15} />, color: "text-blue-300" },
-  ".pyw": { icon: <FileCode size={15} />, color: "text-blue-300" },
-  ".java": { icon: <FileCode size={15} />, color: "text-orange-400" },
-  ".html": { icon: <FileCode size={15} />, color: "text-orange-500" },
-  ".htm": { icon: <FileCode size={15} />, color: "text-orange-500" },
-  ".css": { icon: <FileCode size={15} />, color: "text-pink-400" },
-  ".scss": { icon: <FileCode size={15} />, color: "text-pink-400" },
-  ".sass": { icon: <FileCode size={15} />, color: "text-pink-400" },
-  ".less": { icon: <FileCode size={15} />, color: "text-pink-400" },
-  ".json": { icon: <FileJson size={15} />, color: "text-yellow-300" },
-  ".jsonc": { icon: <FileJson size={15} />, color: "text-yellow-300" },
-  ".md": { icon: <FileText size={15} />, color: "text-gray-400" },
-  ".mdx": { icon: <FileText size={15} />, color: "text-gray-400" },
-  ".xml": { icon: <FileCode size={15} />, color: "text-purple-400" },
-  ".yaml": { icon: <FileCode size={15} />, color: "text-red-400" },
-  ".yml": { icon: <FileCode size={15} />, color: "text-red-400" },
-  ".rs": { icon: <FileCode size={15} />, color: "text-orange-500" },
-  ".php": { icon: <FileCode size={15} />, color: "text-indigo-400" },
-  ".phtml": { icon: <FileCode size={15} />, color: "text-indigo-400" },
-  ".sql": { icon: <FileCode size={15} />, color: "text-orange-300" },
-  ".c": { icon: <FileCode size={15} />, color: "text-blue-400" },
-  ".cpp": { icon: <FileCode size={15} />, color: "text-blue-400" },
-  ".h": { icon: <FileCode size={15} />, color: "text-blue-300" },
-  ".hpp": { icon: <FileCode size={15} />, color: "text-blue-300" },
-  ".cs": { icon: <FileCode size={15} />, color: "text-green-400" },
-  ".go": { icon: <FileCode size={15} />, color: "text-cyan-400" },
-  ".rb": { icon: <FileCode size={15} />, color: "text-red-400" },
-  ".vue": { icon: <FileCode size={15} />, color: "text-green-500" },
-  ".svelte": { icon: <FileCode size={15} />, color: "text-orange-400" },
-  ".astro": { icon: <FileCode size={15} />, color: "text-purple-500" },
-  ".svg": { icon: <FileCode size={15} />, color: "text-yellow-300" },
-  ".png": { icon: <FileCode size={15} />, color: "text-purple-400" },
-  ".jpg": { icon: <FileCode size={15} />, color: "text-purple-400" },
-  ".jpeg": { icon: <FileCode size={15} />, color: "text-purple-400" },
-  ".gif": { icon: <FileCode size={15} />, color: "text-purple-400" },
-  ".ico": { icon: <FileCode size={15} />, color: "text-purple-400" },
-  ".webp": { icon: <FileCode size={15} />, color: "text-purple-400" },
-};
-
-function getFileLanguage(fileName: string) {
-  const ext = "." + fileName.split(".").pop()?.toLowerCase();
-  const lang = EXTENSION_MAP[ext];
-  return lang ? lang() : javascript();
-}
+/** How long typing has to pause before an auto-save. */
+const AUTO_SAVE_DELAY_MS = 1500;
 
 /**
  * How the open file is being presented when it isn't editable text.
@@ -270,78 +153,14 @@ function FilePlaceholder({
   );
 }
 
-function getFileIcon(fileName: string) {
-  const ext = "." + fileName.split(".").pop()?.toLowerCase();
-  const match = FILE_ICON_MAP[ext];
-  if (match) return match;
-  const name = fileName.toLowerCase();
-  if (name === "dockerfile")
-    return { icon: <FileCode size={15} />, color: "text-blue-400" };
-  if (name === "makefile")
-    return { icon: <FileCode size={15} />, color: "text-orange-400" };
-  if (name.startsWith(".env"))
-    return { icon: <FileCode size={15} />, color: "text-yellow-300" };
-  if (name === ".gitignore" || name === ".dockerignore")
-    return { icon: <FileCode size={15} />, color: "text-gray-500" };
-  return { icon: <File size={15} />, color: "text-gray-400" };
-}
-
-function buildFileTree(files: CodeFile[]): TreeNode[] {
-  const root: TreeNode[] = [];
-  const map = new Map<string, TreeNode>();
-
-  for (const file of files) {
-    const parts = file.path.split("/");
-    let currentPath = "";
-    let currentLevel: (TreeNode[] | TreeNode)[] = root;
-
-    parts.forEach((part, i) => {
-      currentPath = currentPath ? `${currentPath}/${part}` : part;
-
-      let existing = map.get(currentPath);
-      if (!existing) {
-        existing = {
-          name: part,
-          path: currentPath,
-          type: i === parts.length - 1 ? "file" : "folder",
-          children: [],
-          file: i === parts.length - 1 ? file : undefined,
-        };
-        map.set(currentPath, existing);
-        (currentLevel as TreeNode[]).push(existing);
-      }
-      currentLevel = existing.children;
-    });
-  }
-
-  const sortNodes = (nodes: TreeNode[]) => {
-    nodes.sort((a, b) => {
-      if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
-      return a.name.localeCompare(b.name);
-    });
-    nodes.forEach((n) => sortNodes(n.children));
-  };
-  sortNodes(root);
-
-  return root;
-}
-
-function findFileInTree(nodes: TreeNode[], path: string): CodeFile | undefined {
-  for (const node of nodes) {
-    if (node.type === "file" && node.path === path) return node.file;
-    if (node.type === "folder") {
-      const found = findFileInTree(node.children, path);
-      if (found) return found;
-    }
-  }
-  return undefined;
-}
-
 export default function Editor({ github, group }: CodeProps) {
   const [fileName, setFileName] = useState("");
   const [fileContent, setFileContent] = useState("");
   const [originalContent, setOriginalContent] = useState("");
   const [loading, setLoading] = useState(true);
+  // The explorer's own spinner: the tree shows as soon as the list arrives,
+  // without waiting for the first file's content.
+  const [treeLoading, setTreeLoading] = useState(true);
   const [openFiles, setOpenFiles] = useState<string[]>([]);
   const [files, setFiles] = useState<CodeFile[]>([]);
   const [isEdited, setIsEdited] = useState(false);
@@ -368,17 +187,17 @@ export default function Editor({ github, group }: CodeProps) {
   // because both traverse the entire document on every change.
   const [heavyFile, setHeavyFile] = useState(false);
   // Permission to edit this repo at all, independent of which file is open.
+  // Language parsing walks the whole document, so it stays off for big files
+  const language = useFileLanguage(fileName, !heavyFile && !sizeReadOnly && !fileNotice);
   const hasCodeAccess = codeAccess === "ACTIVE";
   // …and whether the file currently open is something the editor can edit.
   const canEdit = hasCodeAccess && !sizeReadOnly && !fileNotice;
 
   // Branch selection (auto-fetched from GitHub)
-  const [branches, setBranches] = useState<
-    { name: string; sha: string; isDefault: boolean; isChangeRequest: boolean }[]
-  >([]);
+  const [branches, setBranches] = useState<Branch[]>([]);
   const [currentBranch, setCurrentBranch] = useState<string>("");
-  const [branchMenuOpen, setBranchMenuOpen] = useState(false);
-  const [branchQuery, setBranchQuery] = useState("");
+  // Branch this repo opens on, chosen in Settings; "" means the repo's default.
+  const [startBranch, setStartBranch] = useState("");
   // The group's stored GitHub token expired/was revoked (GitHub App tokens
   // expire ~8h) — show a reconnect banner.
   const [authExpired, setAuthExpired] = useState(false);
@@ -453,6 +272,69 @@ export default function Editor({ github, group }: CodeProps) {
   // Cache loaded file bodies so switching files/tabs is instant. Keyed by
   // `${branch}:${path}` since content differs per branch.
   const contentCache = useRef<Map<string, string>>(new Map());
+  // Bumped by every open. A response that comes back after a newer open is
+  // dropped, so clicking A then B can't end up showing A.
+  const loadSeq = useRef(0);
+
+  // Unsaved text of open files other than the one on screen, by path. The
+  // on-screen file's edits live in fileContent; switching tabs parks them here
+  // so several files can be mid-edit at once.
+  const unsaved = useRef<Map<string, string>>(new Map());
+  const [dirtyOthers, setDirtyOthers] = useState<Set<string>>(new Set());
+  // A file that has never been saved is unsaved whatever its text is.
+  const [neverSaved, setNeverSaved] = useState(false);
+  // The on-screen file as of the latest render, for code that runs after an
+  // await and must not act on the file that was open when it started.
+  // Live co-editing state, for handlers defined before the hook that sets it
+  const coRef = useRef<CoEditing | null>(null);
+  const activeRef = useRef({ path: "", content: "", edited: false });
+  activeRef.current = { path: filePath, content: fileContent, edited: isEdited };
+  const anyDirty = isEdited || dirtyOthers.size > 0;
+
+  // The settings and the background save are both defined further down;
+  // callbacks created up here reach the latest of each through these.
+  const settingsRef = useRef(DEFAULT_IDE_SETTINGS);
+  const backgroundSaveRef = useRef<(path: string, content: string) => void>(() => {});
+
+  /**
+   * Park the on-screen file's unsaved text before another file replaces it.
+   * Returns what was parked, if anything.
+   */
+  const stashActive = useCallback((nextPath: string) => {
+    const active = activeRef.current;
+    if (!active.edited || !active.path || active.path === nextPath) return null;
+    unsaved.current.set(active.path, active.content);
+    setDirtyOthers((prev) => new Set(prev).add(active.path));
+    return { path: active.path, content: active.content };
+  }, []);
+
+  /** Take back a file's parked text, if it has any. */
+  const unstash = useCallback((path: string): string | undefined => {
+    const text = unsaved.current.get(path);
+    if (text === undefined) return undefined;
+    unsaved.current.delete(path);
+    setDirtyOthers((prev) => {
+      const next = new Set(prev);
+      next.delete(path);
+      return next;
+    });
+    return text;
+  }, []);
+
+  /** Give up the on-screen file's edits, so replacing it doesn't park them. */
+  const dropActiveEdits = () => {
+    activeRef.current = { ...activeRef.current, edited: false };
+    setIsEdited(false);
+  };
+
+  // A step that would throw away unsaved edits, held while the user decides.
+  const [pendingAction, setPendingAction] = useState<{
+    title: string;
+    body: string;
+    save: () => Promise<boolean>;
+    run: () => void;
+  } | null>(null);
+  const [resolvingPending, setResolvingPending] = useState(false);
 
   const router = useRouter();
 
@@ -499,8 +381,12 @@ export default function Editor({ github, group }: CodeProps) {
    * with the previous file's text still on screen underneath it.
    */
   const loadFileContent = useCallback(
-    async (file: CodeFile) => {
+    // `branchOverride` is for callers that know the branch before the
+    // currentBranch state has caught up (the first load).
+    async (file: CodeFile, branchOverride?: string) => {
       if (!file) return;
+      const seq = ++loadSeq.current;
+      const branch = branchOverride ?? currentBranch;
 
       // Commit every piece of "this file is open" state together.
       const show = (opts: {
@@ -510,14 +396,22 @@ export default function Editor({ github, group }: CodeProps) {
         heavy?: boolean;
         edited?: boolean;
       }) => {
+        const left = stashActive(file.path);
+        // With auto-save on, leaving a file saves it rather than waiting
+        if (left && settingsRef.current.autoSave !== "off") {
+          backgroundSaveRef.current(left.path, left.content);
+        }
+        // Edits made to this file before it was last switched away from
+        const parked = opts.notice ? undefined : unstash(file.path);
         setFilePath(file.path);
         setFileName(file.name);
-        setFileContent(opts.content);
+        setFileContent(parked ?? opts.content);
         setOriginalContent(opts.content);
         setFileNotice(opts.notice ?? null);
         setSizeReadOnly(opts.readOnly ?? false);
         setHeavyFile(opts.heavy ?? false);
-        setIsEdited(opts.edited ?? false);
+        setNeverSaved(opts.edited ?? false);
+        setIsEdited(parked !== undefined || (opts.edited ?? false));
         setOpenFiles((prev) =>
           prev.includes(file.path) ? prev : [...prev, file.path],
         );
@@ -529,7 +423,7 @@ export default function Editor({ github, group }: CodeProps) {
       }
 
       // Serve from cache for instant tab/file switching
-      const cacheKey = `${currentBranch}:${file.path}`;
+      const cacheKey = `${branch}:${file.path}`;
       const cached = contentCache.current.get(cacheKey);
       if (cached !== undefined) {
         show({ content: cached });
@@ -543,7 +437,7 @@ export default function Editor({ github, group }: CodeProps) {
           body: JSON.stringify({
             groupId: group,
             filePath: file.path,
-            ref: currentBranch || undefined,
+            ref: branch || undefined,
           }),
         });
         if (!res.ok) {
@@ -551,17 +445,19 @@ export default function Editor({ github, group }: CodeProps) {
           throw new Error(err.error || "Failed to fetch file content");
         }
         const data = await res.json();
+        const superseded = seq !== loadSeq.current;
 
         // Anything that isn't plain editable text opens a viewer instead. None
         // of it is cached — the cache holds editable text only, and the chunk
         // viewer maintains its own bounded cache.
         const notice = noticeFor(data, file.name);
         if (notice) {
-          show({ content: "", notice });
+          if (!superseded) show({ content: "", notice });
           return;
         }
 
         contentCache.current.set(cacheKey, data.content);
+        if (superseded) return;
         show({
           content: data.content,
           readOnly: !!data.readOnly,
@@ -570,6 +466,7 @@ export default function Editor({ github, group }: CodeProps) {
       } catch (err) {
         // Nothing above ran, so the previously open file stays put — the
         // breadcrumb keeps naming what's actually on screen.
+        if (seq !== loadSeq.current) return;
         toast.error(
           err instanceof Error && err.message
             ? err.message
@@ -577,100 +474,129 @@ export default function Editor({ github, group }: CodeProps) {
         );
       }
     },
-    [group, currentBranch],
+    [group, currentBranch, stashActive, unstash],
   );
 
   useEffect(() => {
-    if (group && github) {
-      const init = async () => {
-        try {
-          const filesRes = await fetch(`/api/files?group=${group}`);
+    if (!group || !github) return;
 
-          if (filesRes.ok) {
-            const data: CodeFile[] = await filesRes.json();
-            setFiles(data);
-            if (data.length > 0) {
-              await loadFileContent(data[0]!);
-            }
-          } else {
-            const errBody = await filesRes.json().catch(() => ({}));
-            if (errBody.code === "GITHUB_AUTH_EXPIRED") {
-              setAuthExpired(true);
-            } else {
-              // The fixed id keeps a repeated load (e.g. dev re-running effects) to one toast
-              toast.error(errBody.error || "Failed to load the files.", { id: "files-load" });
-            }
+    // Neither of these needs the file list, so they start alongside it rather
+    // than after it.
+    // Code access (best-effort)
+    fetch(`/api/github/collaborator?groupId=${group}&self=1`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setCodeAccess(d?.codeAccess ?? "NONE"))
+      .catch(() => setCodeAccess("NONE"));
+
+    // Read straight from storage: the settings hook hasn't loaded them yet
+    const settings = readStoredIdeSettings();
+    const prefs = readRepoPrefs(group);
+    let startBranch = prefs.startBranch;
+    setStartBranch(startBranch ?? "");
+
+    // Branches (auto-fetched); sets the current branch + baseSha. The branch
+    // chosen in Settings wins over the repo's default while it still exists.
+    let known: Branch[] | null = null;
+    const applyBranch = () => {
+      if (!known) return;
+      const pick =
+        (startBranch && known.find((b) => b.name === startBranch)) ||
+        known.find((b) => b.isDefault) ||
+        known[0];
+      if (pick) {
+        setCurrentBranch(pick.name);
+        setBaseSha(pick.sha);
+      }
+    };
+    fetch(`/api/vcs/branches?groupId=${group}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d?.branches) return;
+        known = d.branches;
+        setBranches(d.branches);
+        applyBranch();
+      })
+      .catch(() => {});
+
+    const listFiles = (branch?: string) =>
+      fetch(`/api/files?group=${group}${branch ? `&ref=${encodeURIComponent(branch)}` : ""}`);
+
+    const init = async () => {
+      try {
+        let filesRes = await listFiles(startBranch);
+        if (!filesRes.ok && startBranch) {
+          const errBody = await filesRes.clone().json().catch(() => ({}));
+          if (errBody.code !== "GITHUB_AUTH_EXPIRED") {
+            // The chosen branch has gone (merged or deleted): open the default
+            toast(`Branch ${startBranch} couldn't be opened, so the default branch is shown.`);
+            startBranch = undefined;
+            setStartBranch("");
+            writeRepoPrefs(group, { startBranch: undefined });
+            applyBranch();
+            filesRes = await listFiles();
           }
-
-          // Code-access (best-effort; don't block file loading)
-          fetch(`/api/github/collaborator?groupId=${group}&self=1`)
-            .then((r) => (r.ok ? r.json() : null))
-            .then((d) => setCodeAccess(d?.codeAccess ?? "NONE"))
-            .catch(() => setCodeAccess("NONE"));
-
-          // Branches (auto-fetched); sets the current branch + baseSha
-          fetch(`/api/vcs/branches?groupId=${group}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .then((d) => {
-              if (!d?.branches) return;
-              setBranches(d.branches);
-              const def =
-                d.branches.find((b: any) => b.isDefault) ?? d.branches[0];
-              if (def) {
-                setCurrentBranch(def.name);
-                setBaseSha(def.sha);
-              }
-            })
-            .catch(() => {});
-        } catch {
-          toast.error("Failed to load the files.", { id: "files-load" });
-        } finally {
-          setLoading(false);
         }
-      };
-      init();
-    }
+
+        if (filesRes.ok) {
+          const data: CodeFile[] = await filesRes.json();
+          setFiles(data);
+          // The tree is usable now; only the editor pane waits for the file
+          setTreeLoading(false);
+
+          const byPath = new Map(data.map((f) => [f.path, f]));
+          const tabs = settings.restoreTabs
+            ? (prefs.tabs ?? []).filter((path) => byPath.has(path))
+            : [];
+          const last = prefs.active ? byPath.get(prefs.active) : undefined;
+          let first: CodeFile | undefined;
+          if (tabs.length > 0 || settings.openFirst === "last") first = last;
+          // "last" with nothing to go back to opens the README like a first visit
+          if (!first && (settings.openFirst !== "none" || tabs.length > 0)) {
+            first =
+              (tabs[0] !== undefined ? byPath.get(tabs[0]) : undefined) ??
+              data.find((f) => /^readme(\.md)?$/i.test(f.path)) ??
+              data[0];
+          }
+          if (tabs.length > 0) setOpenFiles(tabs);
+          if (first) await loadFileContent(first, startBranch ?? "");
+        } else {
+          const errBody = await filesRes.json().catch(() => ({}));
+          if (errBody.code === "GITHUB_AUTH_EXPIRED") {
+            setAuthExpired(true);
+          } else {
+            // The fixed id keeps a repeated load (e.g. dev re-running effects) to one toast
+            toast.error(errBody.error || "Failed to load the files.", { id: "files-load" });
+          }
+        }
+      } catch {
+        toast.error("Failed to load the files.", { id: "files-load" });
+      } finally {
+        setTreeLoading(false);
+        setLoading(false);
+      }
+    };
+    init();
     // Run once per repo — must NOT depend on loadFileContent, which changes
     // with currentBranch and would re-run init and reset the selected branch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [group, github]);
 
-  const handleFileChange = (newContent: string) => {
-    if (!canEdit) return; // editing gated on accepted code access
-    const originalLines = originalContent.split("\n");
-    const newLines = newContent.split("\n");
-
-    const changes: {
-      type: string;
-      lineNumber: number;
-      content: string;
-    }[] = [];
-
-    newLines.forEach((line, index) => {
-      if (index >= originalLines.length) {
-        changes.push({ type: "added", lineNumber: index + 1, content: line });
-      } else if (line !== originalLines[index]) {
-        changes.push({
-          type: "modified",
-          lineNumber: index + 1,
-          content: line,
-        });
-      }
-    });
-
-    originalLines.forEach((line, index) => {
-      if (index >= newLines.length) {
-        changes.push({
-          type: "removed",
-          lineNumber: index + 1,
-          content: line,
-        });
-      }
-    });
-
-    setIsEdited(changes.length > 0);
+  // Stable identity (CodeMirror reconfigures itself when onChange changes), so
+  // what it needs from the latest render comes through a ref.
+  const changeRef = useRef({ canEdit, originalContent, neverSaved });
+  changeRef.current = { canEdit, originalContent, neverSaved };
+  const handleFileChange = useCallback((newContent: string) => {
+    const latest = changeRef.current;
+    // Editing live as a guest: the text lives in the host's draft, so nothing
+    // is unsaved here (and a remote edit arriving must still show)
+    if (coRef.current?.status === "guest") {
+      setFileContent(newContent);
+      return;
+    }
+    if (!latest.canEdit) return; // editing gated on accepted code access
+    setIsEdited(latest.neverSaved || newContent !== latest.originalContent);
     setFileContent(newContent);
-  };
+  }, []);
 
   const expandToFile = (path: string) => {
     const parts = path.split("/");
@@ -683,7 +609,21 @@ export default function Editor({ github, group }: CodeProps) {
     setExpandedFolders(toExpand);
   };
 
-  const handleFileClick = async (file: CodeFile) => {
+  /** Back to "no file open". */
+  const clearOpenFile = () => {
+    loadSeq.current++; // a load still in flight must not reopen something
+    setFilePath("");
+    setFileName("");
+    setFileContent("");
+    setOriginalContent("");
+    setFileNotice(null);
+    setSizeReadOnly(false);
+    setHeavyFile(false);
+    setNeverSaved(false);
+    setIsEdited(false);
+  };
+
+  const handleFileClick = (file: CodeFile) => {
     // Expanding the tree is safe to do up front — it only reveals the node in
     // the sidebar. Naming the file is loadFileContent's job, and only once the
     // content actually arrives.
@@ -691,45 +631,55 @@ export default function Editor({ github, group }: CodeProps) {
     // From Terminal, Settings etc. the editor is hidden, so the file would load
     // out of sight. The terminal stays mounted, so its shell keeps running.
     setIdeSection("files");
-    await loadFileContent(file);
+    // Already open: reloading it would throw away what's been typed
+    if (file.path === filePath) return;
+    void loadFileContent(file);
   };
 
   // Switch the branch being viewed/edited: refetch its tree, reset caches,
   // and re-anchor baseSha to that branch's head.
-  const switchBranch = async (name: string) => {
-    if (name === currentBranch) {
-      setBranchMenuOpen(false);
-      return;
-    }
-    setBranchMenuOpen(false);
+  const switchBranch = (name: string) => {
+    if (name === currentBranch) return;
+    if (!anyDirty || !ide.settings.confirmDiscard) return void loadBranch(name);
+    // Tabs don't carry over to another branch, so their edits would be lost
+    setPendingAction({
+      title: "Save your changes first?",
+      body: `Switching to ${name} closes the open tabs. Unsaved edits in them would be lost.`,
+      save: saveAll,
+      run: () => void loadBranch(name),
+    });
+  };
+
+  const loadBranch = async (name: string) => {
     setLoading(true);
-    setCurrentBranch(name);
-    setBaseSha(branches.find((b) => b.name === name)?.sha ?? baseSha);
-    contentCache.current.clear();
-    setOpenFiles([]);
-    setIsEdited(false);
+    setTreeLoading(true);
     try {
       const res = await fetch(`/api/files?group=${group}&ref=${encodeURIComponent(name)}`);
-      if (res.ok) {
-        const data: CodeFile[] = await res.json();
-        setFiles(data);
-        if (data.length > 0) {
-          await loadFileContentFor(data[0]!, name);
-        } else {
-          setFileContent("");
-          setOriginalContent("");
-          setFilePath("");
-          setFileName("");
-          setFileNotice(null);
-          setSizeReadOnly(false);
-          setHeavyFile(false);
-        }
-      } else {
-        toast.error("Failed to load that branch.");
+      if (!res.ok) {
+        // Nothing has changed yet, so the editor is still wholly on the
+        // previous branch.
+        const errBody = await res.json().catch(() => ({}));
+        if (errBody.code === "GITHUB_AUTH_EXPIRED") setAuthExpired(true);
+        else toast.error(errBody.error || "Failed to load that branch.");
+        return;
       }
+      const data: CodeFile[] = await res.json();
+
+      // The new tree is in hand: move everything over together.
+      setCurrentBranch(name);
+      setBaseSha(branches.find((b) => b.name === name)?.sha ?? baseSha);
+      contentCache.current.clear();
+      unsaved.current.clear();
+      setDirtyOthers(new Set());
+      setFiles(data);
+      setOpenFiles([]);
+      clearOpenFile();
+      const first = data.find((f) => /^readme(\.md)?$/i.test(f.path)) ?? data[0];
+      if (first) await loadFileContentFor(first, name);
     } catch {
       toast.error("Failed to load that branch.");
     } finally {
+      setTreeLoading(false);
       setLoading(false);
     }
   };
@@ -737,6 +687,7 @@ export default function Editor({ github, group }: CodeProps) {
   // Load content for a file on a specific branch (used right after switching,
   // before the currentBranch state has propagated to loadFileContent).
   const loadFileContentFor = async (file: CodeFile, branch: string) => {
+    const seq = ++loadSeq.current;
     // Same success-first ordering as loadFileContent: nothing about the open
     // file changes until there's content to show.
     const show = (opts: {
@@ -752,6 +703,7 @@ export default function Editor({ github, group }: CodeProps) {
       setFileNotice(opts.notice ?? null);
       setSizeReadOnly(opts.readOnly ?? false);
       setHeavyFile(opts.heavy ?? false);
+      setNeverSaved(false);
       setIsEdited(false);
       setOpenFiles([file.path]);
     };
@@ -775,6 +727,7 @@ export default function Editor({ github, group }: CodeProps) {
         throw new Error(err.error || "Failed to fetch file content");
       }
       const data = await res.json();
+      if (seq !== loadSeq.current) return;
 
       const notice = noticeFor(data, file.name);
       if (notice) {
@@ -785,6 +738,7 @@ export default function Editor({ github, group }: CodeProps) {
       contentCache.current.set(cacheKey, data.content);
       show({ content: data.content, readOnly: !!data.readOnly, heavy: !!data.heavy });
     } catch (err) {
+      if (seq !== loadSeq.current) return;
       toast.error(
         err instanceof Error && err.message
           ? err.message
@@ -793,48 +747,155 @@ export default function Editor({ github, group }: CodeProps) {
     }
   };
 
-  // Save just the current file's changes to your draft — stays in the editor.
-  const handleSave = async () => {
-    if (!isEdited) return;
-    setSaving(true);
+  /**
+   * Write one file to the user's draft. Resolves false when it didn't save, so
+   * callers don't carry on as if the work were safe.
+   */
+  const saveFile = async (path: string, content: string): Promise<boolean> => {
+    const name = path.split("/").pop() ?? path;
     try {
       const res = await fetch(`/api/modified-files`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: fileName,
-          path: filePath,
-          userId,
-          content: fileContent,
-          group,
-          baseSha,
-        }),
+        body: JSON.stringify({ name, path, userId, content, group, baseSha }),
       });
-
-      if (!res.ok) {
-        throw new Error("Failed to save the file");
-      }
+      if (!res.ok) throw new Error("Failed to save the file");
 
       // Keep the cache in sync so switching away and back shows saved content
-      contentCache.current.set(`${currentBranch}:${filePath}`, fileContent);
-      setOriginalContent(fileContent);
-      toast.success(`Saved ${fileName}`);
-      setIsEdited(false);
-      void livePreview.syncSavedFile(filePath, fileContent);
+      contentCache.current.set(`${currentBranch}:${path}`, content);
+      // Once saved, a new file is a draft like any other: it loads from the
+      // cache or the server, not from the text it was created with.
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.path === path && f._generated ? { ...f, _generated: false, content: undefined } : f,
+        ),
+      );
+      void livePreview.syncSavedFile(path, content);
       // A server started with --watch/nodemon in the terminal picks this up
-      syncFileToContainer(filePath, fileContent).catch(() => {});
+      syncFileToContainer(path, content).catch(() => {});
+      return true;
     } catch {
-      toast.error("Failed to save the file.");
-    } finally {
-      setSaving(false);
+      toast.error(`Failed to save ${name}.`);
+      return false;
     }
   };
 
-  // Go to the change-request page. Save the current file first if it's dirty.
+  // Save the on-screen file's changes to your draft — stays in the editor.
+  // `auto` is a save the user didn't ask for: no toast, and no reformatting,
+  // which would move the text under the cursor mid-thought.
+  const handleSave = async (opts: { auto?: boolean } = {}): Promise<boolean> => {
+    const co = coRef.current;
+    if (co?.status === "guest") {
+      if (!opts.auto) {
+        co.requestSave();
+        toast.success(`Asked ${co.host?.name ?? "the host"} to save`);
+      }
+      return true;
+    }
+    if (!isEdited) return true;
+    if (saving) return false;
+    const path = filePath;
+    const typed = fileContent;
+    let content = typed;
+    setSaving(true);
+
+    if (!opts.auto && ide.settings.formatOnSave) {
+      const formatted = await formatSource(path, typed, {
+        tabWidth: ide.settings.tabSize,
+        useTabs: ide.settings.useTabs,
+      });
+      // Only if nothing was typed while the formatter ran
+      const now = activeRef.current;
+      if (formatted !== null && now.path === path && now.content === typed) {
+        content = formatted;
+        if (formatted !== typed) setFileContent(formatted);
+      }
+    }
+
+    const saved = await saveFile(path, content);
+    setSaving(false);
+    if (!saved) return false;
+
+    if (!opts.auto) toast.success(`Saved ${fileName}`);
+    // Still on that file? It may have been typed in while the save ran.
+    const active = activeRef.current;
+    if (active.path === path) {
+      setOriginalContent(content);
+      setNeverSaved(false);
+      setIsEdited(active.content !== typed && active.content !== content);
+    }
+    return true;
+  };
+
+  // Save a file the user has just switched away from (auto-save). Its text is
+  // parked in `unsaved`; on success it stops counting as unsaved.
+  backgroundSaveRef.current = (path, content) => {
+    void saveFile(path, content).then((saved) => {
+      if (!saved) return;
+      if (unsaved.current.get(path) === content) {
+        unstash(path);
+        return;
+      }
+      // Reopened in the meantime, with nothing typed since
+      const active = activeRef.current;
+      if (active.path === path && active.content === content) {
+        setOriginalContent(content);
+        setNeverSaved(false);
+        setIsEdited(false);
+      }
+    });
+  };
+
+  /** Save every tab with unsaved edits, stopping at the first failure. */
+  const saveAll = async (): Promise<boolean> => {
+    if (!(await handleSave())) return false;
+    for (const [path, content] of [...unsaved.current]) {
+      if (!(await saveFile(path, content))) return false;
+      unstash(path);
+    }
+    return true;
+  };
+
+  // Go to the change-request page, saving every unsaved tab first.
   const handleRaiseChangeRequest = async () => {
-    if (isEdited) await handleSave();
+    // Leaving after a failed save would drop the edits
+    if (!(await saveAll())) return;
     router.push(`/confirm-changes/${group}`);
   };
+
+  // Ctrl/Cmd+S saves the open file. The ref keeps the listener pointed at the
+  // latest buffer without re-subscribing on every keystroke.
+  const saveShortcutRef = useRef({ section: ideSection, save: () => handleSave() });
+  saveShortcutRef.current = { section: ideSection, save: () => handleSave() };
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      if (e.key.toLowerCase() !== "s") return;
+      const { section, save } = saveShortcutRef.current;
+      if (section !== "files") return; // the terminal keeps its own Ctrl+S
+      e.preventDefault(); // not the browser's "save page" dialog
+      void save();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
+
+  // Closing or reloading the tab with unsaved edits asks first
+  useEffect(() => {
+    if (!anyDirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [anyDirty]);
+
+  // A Node app with nothing to serve as a static site (e.g. Express + EJS):
+  // Make it live can't host it, the terminal can run it.
+  const isServerApp =
+    files.some((f) => f.path === "package.json") &&
+    !files.some((f) => f.path === "index.html" || f.path.endsWith("/index.html"));
 
   // ── New file ──────────────────────────────────────────────────────────────
   // Null when closed; otherwise the path being typed in the explorer.
@@ -872,6 +933,7 @@ export default function Editor({ github, group }: CodeProps) {
       url: "",
       content: "",
       _generated: true,
+      draft: true,
     };
     setFiles((prev) => [...prev, file]);
     setNewFilePath(null);
@@ -897,17 +959,20 @@ export default function Editor({ github, group }: CodeProps) {
 
       const data = await res.json();
 
+      const path: string = data.path || "README.md";
+      const exists = files.find((f) => f.path === path);
       const virtualFile: CodeFile = {
         name: data.fileName || "README.md",
-        path: data.path || "README.md",
+        path,
         sha: "",
         size: (data.content || "").length,
         url: "",
         content: data.content,
         _generated: true,
+        // Replacing a README the repo already has isn't a new file
+        draft: exists ? exists.draft : true,
       };
 
-      const exists = files.find((f) => f.path === virtualFile.path);
       if (exists) {
         setFiles((prev) =>
           prev.map((f) =>
@@ -919,6 +984,10 @@ export default function Editor({ github, group }: CodeProps) {
       }
 
       expandToFile(virtualFile.path);
+      loadSeq.current++; // a file still loading must not replace the README
+      stashActive(virtualFile.path);
+      unstash(virtualFile.path); // the generated text replaces any earlier edits
+      setNeverSaved(true);
       setFileName(virtualFile.name);
       setFilePath(virtualFile.path);
       setFileContent(virtualFile.content || "");
@@ -943,119 +1012,47 @@ export default function Editor({ github, group }: CodeProps) {
     }
   };
 
-  const toggleFolder = (path: string) => {
+  const toggleFolder = useCallback((path: string) => {
     setExpandedFolders((prev) => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
       else next.add(path);
       return next;
     });
+  }, []);
+
+  /** Close the on-screen file's tab and show the last remaining one, if any. */
+  const closeActiveTab = () => {
+    dropActiveEdits();
+    const remaining = openFiles.filter((p) => p !== filePath);
+    setOpenFiles(remaining);
+    const last = remaining[remaining.length - 1];
+    const next =
+      last === undefined
+        ? undefined
+        : files.find((fl) => fl.path === last) || findFileInTree(fileTree, last);
+    // With no tab left there is no file open, so the editor empties too
+    if (next) void loadFileContent(next);
+    else clearOpenFile();
   };
 
   const closeTab = (path: string) => {
-    setOpenFiles((prev) => prev.filter((p) => p !== path));
-    if (filePath === path && openFiles.length > 0) {
-      const remaining = openFiles.filter((p) => p !== path);
-      if (remaining.length > 0) {
-        const last = remaining[remaining.length - 1]!;
-        const f =
-          files.find((fl) => fl.path === last) ||
-          findFileInTree(fileTree, last);
-        if (f) handleFileClick(f);
-      }
-    }
-  };
+    const isActive = path === filePath;
+    const close = isActive
+      ? closeActiveTab
+      : () => {
+          unstash(path);
+          setOpenFiles((prev) => prev.filter((p) => p !== path));
+        };
+    const clean = isActive ? !isEdited : !dirtyOthers.has(path);
+    if (clean || !ide.settings.confirmDiscard) return close();
 
-  const renderTreeNode = (node: TreeNode, depth: number = 0) => {
-    const isExpanded = expandedFolders.has(node.path);
-    const isSelected = node.path === filePath;
-
-    if (node.type === "folder") {
-      return (
-        <div key={node.path}>
-          <button
-            onClick={() => toggleFolder(node.path)}
-            className={`w-full flex items-center gap-1 px-2 py-1 text-left text-sm transition-colors duration-150 hover:bg-gray-800 rounded-sm ${
-              isSelected ? "bg-gray-700" : ""
-            }`}
-            style={{ paddingLeft: `${12 + depth * 16}px` }}
-          >
-            <span className="w-4 h-4 flex items-center justify-center text-gray-500">
-              {isExpanded ? (
-                <ChevronDown size={14} />
-              ) : (
-                <ChevronRight size={14} />
-              )}
-            </span>
-            <span className="w-4 h-4 flex items-center justify-center text-gray-400">
-              {isExpanded ? <FolderOpen size={15} /> : <Folder size={15} />}
-            </span>
-            <span className="truncate text-gray-300">{node.name}</span>
-          </button>
-          {isExpanded && (
-            <div>
-              {node.children.map((child) => renderTreeNode(child, depth + 1))}
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    const { icon, color } = getFileIcon(node.name);
-    const stagedForDelete = deletedPaths.has(node.path);
-    return (
-      // A div, not a button: the delete control is itself a button and nesting
-      // one inside another is invalid HTML (and breaks click handling).
-      <div
-        key={node.path}
-        className={`group flex w-full items-center gap-1 rounded-sm px-2 py-1 text-sm transition-colors duration-150 ${
-          isSelected
-            ? "bg-gray-700 text-white"
-            : "text-gray-400 hover:bg-gray-800 hover:text-gray-200"
-        }`}
-        style={{ paddingLeft: `${28 + depth * 16}px` }}
-      >
-        <button
-          onClick={() => node.file && handleFileClick(node.file)}
-          className="flex min-w-0 flex-1 items-center gap-1 text-left"
-        >
-          <span className={`w-4 h-4 flex items-center justify-center shrink-0 ${color}`}>
-            {icon}
-          </span>
-          <span className={`truncate ${stagedForDelete ? "line-through opacity-60" : ""}`}>
-            {node.name}
-          </span>
-          {node.file?._generated && (
-            <Sparkles className="w-3 h-3 ml-1 text-yellow-400 shrink-0" />
-          )}
-        </button>
-
-        {/* Deletion is an edit, so it needs the same access as typing. */}
-        {canEdit && node.file && !node.file._generated && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              stagedForDelete ? restoreFile(node.path) : setDeleteTarget(node);
-            }}
-            aria-label={
-              stagedForDelete ? `Undo delete of ${node.name}` : `Delete ${node.name}`
-            }
-            title={
-              stagedForDelete
-                ? "Undo staged deletion"
-                : "Delete file (applied when the change request is merged)"
-            }
-            className={`shrink-0 rounded p-0.5 transition-opacity hover:bg-gray-700 ${
-              stagedForDelete
-                ? "text-amber-400 opacity-100"
-                : "text-gray-500 opacity-0 hover:text-red-400 focus:opacity-100 group-hover:opacity-100"
-            }`}
-          >
-            {stagedForDelete ? <Undo2 size={13} /> : <Trash2 size={13} />}
-          </button>
-        )}
-      </div>
-    );
+    setPendingAction({
+      title: `Save changes to ${path.split("/").pop() ?? path}?`,
+      body: "This file has unsaved edits. Discarding them can't be undone.",
+      save: isActive ? () => handleSave() : () => saveFile(path, unsaved.current.get(path) ?? ""),
+      run: close,
+    });
   };
 
   /**
@@ -1093,6 +1090,38 @@ export default function Editor({ github, group }: CodeProps) {
     void loadTrash();
   }, [loadTrash]);
 
+  /**
+   * Remove a file that exists only as this user's draft. There is nothing in
+   * the repo to stage a deletion of, so this drops the draft itself.
+   */
+  const discardNewFile = async (file: CodeFile) => {
+    setDeleteTarget(null);
+    try {
+      // Never saved means nothing was stored for it
+      if (!file._generated) {
+        const res = await fetch("/api/modified-files", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: file.path, group }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? "Failed");
+      }
+      for (const key of [...contentCache.current.keys()]) {
+        if (key.endsWith(`:${file.path}`)) contentCache.current.delete(key);
+      }
+      setFiles((prev) => prev.filter((f) => f.path !== file.path));
+      if (file.path === filePath) {
+        closeActiveTab();
+      } else {
+        unstash(file.path);
+        setOpenFiles((prev) => prev.filter((p) => p !== file.path));
+      }
+      toast.success(`Discarded ${file.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error && err.message !== "Failed" ? err.message : "Couldn't discard the file");
+    }
+  };
+
   const stageDelete = async (node: TreeNode) => {
     setDeleteTarget(null);
     try {
@@ -1103,7 +1132,6 @@ export default function Editor({ github, group }: CodeProps) {
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Failed");
       setDeletedPaths((prev) => new Set(prev).add(node.path));
-      setIsEdited(true);
       void loadTrash();
       toast.success("Staged for deletion — raise a change request to apply it");
     } catch (err) {
@@ -1160,6 +1188,29 @@ export default function Editor({ github, group }: CodeProps) {
   // ── Editor settings (font size, theme) ────────────────────────────────────
   const { resolvedTheme } = useTheme();
   const ide = useIdeSettings(resolvedTheme !== "light");
+  settingsRef.current = ide.settings;
+
+  // Auto-save once typing pauses. The ref keeps the timer pointed at the
+  // latest save without restarting it for unrelated renders.
+  const autoSaveRef = useRef(handleSave);
+  autoSaveRef.current = handleSave;
+  const autoSaveAfterDelay = ide.settings.autoSave === "afterDelay";
+  useEffect(() => {
+    if (!autoSaveAfterDelay || !isEdited || !filePath || !canEdit) return;
+    const timer = setTimeout(() => void autoSaveRef.current({ auto: true }), AUTO_SAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [autoSaveAfterDelay, isEdited, filePath, fileContent, canEdit]);
+
+  // Remember the open tabs for "restore tabs" and "open the last file"
+  useEffect(() => {
+    if (loading) return;
+    writeRepoPrefs(group, { tabs: openFiles, active: filePath || undefined });
+  }, [group, loading, openFiles, filePath]);
+
+  const changeStartBranch = (name: string) => {
+    setStartBranch(name);
+    writeRepoPrefs(group, { startBranch: name || undefined });
+  };
 
   // ── Run code ──────────────────────────────────────────────────────────────
   const {
@@ -1207,8 +1258,12 @@ export default function Editor({ github, group }: CodeProps) {
         entry,
         entrySource,
         exists: (p) => available.has(p),
-        // The open tab's text includes unsaved edits
-        read: (p) => (p === filePath ? Promise.resolve(fileContent) : readRepoText(p)),
+        // Open tabs are read with their unsaved edits
+        read: (p) => {
+          if (p === filePath) return Promise.resolve(fileContent);
+          const parked = unsaved.current.get(p);
+          return parked !== undefined ? Promise.resolve(parked) : readRepoText(p);
+        },
       });
     },
     [files, deletedPaths, filePath, fileContent, readRepoText, startRunner],
@@ -1250,8 +1305,112 @@ export default function Editor({ github, group }: CodeProps) {
     [],
   );
 
+  // Memoised: a new array each render would have CodeMirror reconfigure on
+  // every keystroke.
+  const editorExtensions = useMemo(
+    () =>
+      heavyFile || sizeReadOnly
+        ? [runKeymap, ide.fontSizeExtension, ide.behaviourExtension]
+        : [
+            runKeymap,
+            ide.fontSizeExtension,
+            ide.behaviourExtension,
+            ...(language ? [language] : []),
+            lintExtension,
+            LINT_GUTTER,
+          ],
+    [
+      heavyFile,
+      sizeReadOnly,
+      runKeymap,
+      ide.fontSizeExtension,
+      ide.behaviourExtension,
+      language,
+      lintExtension,
+    ],
+  );
+
+  const dirtyPaths = useMemo(() => {
+    const paths = new Set(dirtyOthers);
+    if (isEdited && filePath) paths.add(filePath);
+    return paths;
+  }, [dirtyOthers, isEdited, filePath]);
+
+  // Who else in the group has which file open (and whether they're editing it)
+  const activity = useFileActivity({
+    groupId: group,
+    userId,
+    userName: session?.user?.name || session?.user?.email?.split("@")[0] || "Someone",
+    openPath: ideSection === "files" && filePath ? filePath : null,
+    editing: isEdited,
+  });
+  const othersOnThisFile = filePath ? activity.get(filePath) : undefined;
+
+  // ── Live co-editing (see lib/coEditing/session.ts) ──
+  // A file opened with unsaved edits of your own isn't shared: joining would
+  // replace them with the live copy. You edit alone until you save or discard.
+  const [coBlocked, setCoBlocked] = useState<string | null>(null);
+  useEffect(() => {
+    setCoBlocked(isEdited ? filePath : null);
+    // Decided once, when a file is opened
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filePath]);
+  // Saved or discarded since: nothing of yours would be lost, so join now
+  useEffect(() => {
+    if (!isEdited && coBlocked === filePath) setCoBlocked(null);
+  }, [isEdited, coBlocked, filePath]);
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+  const co = useCoEditing({
+    groupId: group,
+    userId,
+    userName: session?.user?.name || session?.user?.email?.split("@")[0] || "Someone",
+    branch: currentBranch,
+    path:
+      filePath && !fileNotice && !sizeReadOnly && !heavyFile && coBlocked !== filePath ? filePath : null,
+    canHost: hasCodeAccess,
+    getText: () => activeRef.current.content,
+    onSaveRequest: () => void handleSaveRef.current(),
+  });
+  coRef.current = co;
+
+  // The editor is bound to the shared text only once both hold the same text,
+  // or the binding would broadcast the difference as an edit
+  const [coBound, setCoBound] = useState(false);
+  useEffect(() => {
+    if (co.status === "host") {
+      co.syncFrom(activeRef.current.content);
+      setCoBound(true);
+    } else if (co.status === "guest") {
+      // Show the host's copy; bound by the effect below once it's on screen
+      setFileContent(co.sharedText());
+      setIsEdited(false);
+    } else {
+      setCoBound(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [co.status, co.binding]);
+  useEffect(() => {
+    if (co.status === "guest" && !coBound && fileContent === co.sharedText()) setCoBound(true);
+  }, [co, coBound, fileContent]);
+  const liveWith = co.participants.filter((p) => p.userId !== userId);
+  const isLive = (co.status === "host" || co.status === "guest") && liveWith.length > 0;
+  // Its own memo, so the editor is only reconfigured when the binding changes
+  const extensions = useMemo(
+    () => (coBound && co.binding ? [...editorExtensions, co.binding] : editorExtensions),
+    [editorExtensions, coBound, co.binding],
+  );
+
+  // The tree is memoised, so its callbacks keep one identity and reach the
+  // latest handlers through a ref.
+  const treeHandlers = useRef({ open: handleFileClick, restore: restoreFile });
+  treeHandlers.current = { open: handleFileClick, restore: restoreFile };
+  const onTreeOpen = useCallback((file: CodeFile) => treeHandlers.current.open(file), []);
+  const onTreeRestore = useCallback((path: string) => void treeHandlers.current.restore(path), []);
+
   return (
     <IdeShell
+      theme={ide.theme}
       repo={github}
       section={ideSection}
       onSectionChange={setIdeSection}
@@ -1294,7 +1453,7 @@ export default function Editor({ github, group }: CodeProps) {
             </p>
           </form>
         )}
-        {loading ? (
+        {treeLoading ? (
           <div className="flex items-center gap-2 px-3 py-6 text-sm text-gray-500">
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-gray-500 border-t-transparent" />
             Loading files…
@@ -1314,7 +1473,19 @@ export default function Editor({ github, group }: CodeProps) {
             </div>
           )
         ) : (
-          <>{fileTree.map((node) => renderTreeNode(node, 0))}</>
+          <FileTree
+            nodes={fileTree}
+            expanded={expandedFolders}
+            activePath={filePath}
+            deletedPaths={deletedPaths}
+            dirtyPaths={dirtyPaths}
+            activity={activity}
+            canEdit={hasCodeAccess}
+            onToggleFolder={toggleFolder}
+            onOpen={onTreeOpen}
+            onDelete={setDeleteTarget}
+            onRestore={onTreeRestore}
+          />
         )}
         </>
       }
@@ -1325,7 +1496,11 @@ export default function Editor({ github, group }: CodeProps) {
           groupId={group}
           branch={currentBranch}
           active={ideSection === "terminal"}
-          hasUnsavedChanges={isEdited}
+          hasUnsavedChanges={anyDirty}
+          fontSize={ide.settings.terminalFontSize}
+          background={ide.theme.swatch[0]}
+          foreground={ide.theme.text}
+          startCommand={ide.settings.terminalCommand}
         />
       )}
       {ideSection === "terminal" ? null : ideSection === "collaboration" ? (
@@ -1348,6 +1523,12 @@ export default function Editor({ github, group }: CodeProps) {
             ide={ide}
             autoUpdateLiveSite={livePreview.autoUpdate}
             onAutoUpdateLiveSiteChange={livePreview.setAutoUpdate}
+            branches={branches}
+            startBranch={startBranch}
+            onStartBranchChange={changeStartBranch}
+            onReconnectGithub={handleReconnectGithub}
+            reconnecting={reconnecting}
+            onOpenCollaboration={() => setIdeSection("collaboration")}
           />
         </div>
       ) : (
@@ -1355,10 +1536,17 @@ export default function Editor({ github, group }: CodeProps) {
         {/* Top Toolbar */}
         <div className="flex items-center justify-between px-4 py-2 bg-gray-800/80 border-b border-gray-700/50">
           <div className="flex items-center gap-2 min-w-0">
+            <BranchMenu
+              branches={branches}
+              current={currentBranch}
+              onSelect={switchBranch}
+              disabled={loading}
+            />
             <LiveSiteControl
               live={livePreview}
               branch={currentBranch}
               unsaved={isEdited && filePath ? { path: filePath, content: fileContent } : undefined}
+              onRunServerApp={isServerApp ? () => setIdeSection("terminal") : undefined}
             />
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -1371,7 +1559,7 @@ export default function Editor({ github, group }: CodeProps) {
               )}
             </span>
             <button
-              onClick={handleSave}
+              onClick={() => void handleSave()}
               disabled={!isEdited || saving}
               className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded transition-colors ${
                 isEdited
@@ -1394,7 +1582,8 @@ export default function Editor({ github, group }: CodeProps) {
         <EditorTabs
           openFiles={openFiles}
           activePath={filePath}
-          dirtyPaths={isEdited && filePath ? new Set([filePath]) : undefined}
+          dirtyPaths={dirtyPaths}
+          activity={activity}
           onSelect={(p) => {
             const f = files.find((fl) => fl.path === p) || findFileInTree(fileTree, p);
             if (f) handleFileClick(f);
@@ -1429,6 +1618,44 @@ export default function Editor({ github, group }: CodeProps) {
         />
 
         <EditorBreadcrumb repo={github} path={filePath} />
+
+        {/* Two people changing one file meet as a conflict at change-request
+            time; seeing each other now is the cheap way to avoid that */}
+        {isLive ? (
+          // Editing together: who's here, and whose change request it goes into
+          <div className="flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-emerald-700/40 bg-emerald-950/30 px-4 py-1.5 text-xs text-emerald-200">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-400" />
+            </span>
+            <span className="font-medium">
+              Editing live with {liveWith.map((p) => p.name.split(" ")[0]).join(", ")}
+            </span>
+            <span className="text-emerald-300/80">
+              {co.status === "host"
+                ? "· Everyone's typing goes into your changes. You save them."
+                : `· Saved to ${co.host?.name.split(" ")[0] ?? "the host"}'s changes. Save asks them to save.`}
+            </span>
+          </div>
+        ) : co.status === "connecting" && co.host ? (
+          <div className="shrink-0 border-b border-emerald-700/40 bg-emerald-950/30 px-4 py-1.5 text-xs text-emerald-200">
+            Joining {co.host.name.split(" ")[0]}&apos;s live session…
+          </div>
+        ) : (
+          othersOnThisFile &&
+          othersOnThisFile.length > 0 && (
+            <div className="flex shrink-0 items-center gap-2 border-b border-amber-700/40 bg-amber-950/30 px-4 py-1.5 text-xs text-amber-200">
+              <FileActivityBadge people={othersOnThisFile} />
+              <span>
+                {describeActivity(othersOnThisFile)}
+                {coBlocked === filePath
+                  ? ". You have unsaved edits here, so you're not editing live with them. Save or discard to join."
+                  : othersOnThisFile.some((p) => p.editing) &&
+                    ". If you both change the same lines, one of you will resolve a conflict when submitting."}
+              </span>
+            </div>
+          )
+        )}
 
         {/* Code Editor */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -1530,6 +1757,10 @@ export default function Editor({ github, group }: CodeProps) {
                   Loading editor...
                 </div>
               </div>
+            ) : !filePath ? (
+              <div className="flex h-full items-center justify-center p-8 text-sm text-gray-500">
+                {files.length > 0 ? "Select a file to open it" : "No file open"}
+              </div>
             ) : fileNotice?.kind === "image" ? (
               <ImagePreview
                 name={fileNotice.name}
@@ -1561,28 +1792,9 @@ export default function Editor({ github, group }: CodeProps) {
                 // Language parsing and JSON linting both walk the whole
                 // document on every change, so they come off past 1 MB — that
                 // traversal, not the rendering, is what stalls the tab.
-                extensions={
-                  heavyFile || sizeReadOnly
-                    ? [runKeymap, ide.fontSizeExtension]
-                    : [
-                        runKeymap,
-                        ide.fontSizeExtension,
-                        getFileLanguage(fileName),
-                        lintExtension,
-                        lintGutter(),
-                      ]
-                }
+                extensions={extensions}
                 onChange={handleFileChange}
-                basicSetup={{
-                  lineNumbers: true,
-                  highlightActiveLineGutter: true,
-                  highlightActiveLine: true,
-                  foldGutter: true,
-                  bracketMatching: true,
-                  closeBrackets: true,
-                  indentOnInput: true,
-                  tabSize: 2,
-                }}
+                basicSetup={ide.basicSetup}
               />
             )}
           </div>
@@ -1612,15 +1824,69 @@ export default function Editor({ github, group }: CodeProps) {
       </div>
       )}
 
+      {pendingAction && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="unsaved-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        >
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl dark:bg-gray-900">
+            <h3 id="unsaved-title" className="text-base font-semibold text-gray-900 dark:text-white">
+              {pendingAction.title}
+            </h3>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">{pendingAction.body}</p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                onClick={() => setPendingAction(null)}
+                disabled={resolvingPending}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm disabled:opacity-50 dark:border-gray-700"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const { run } = pendingAction;
+                  setPendingAction(null);
+                  run();
+                }}
+                disabled={resolvingPending}
+                className="rounded-lg border border-red-300 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/40"
+              >
+                Discard
+              </button>
+              <button
+                autoFocus
+                onClick={async () => {
+                  const { save, run } = pendingAction;
+                  setResolvingPending(true);
+                  const saved = await save();
+                  setResolvingPending(false);
+                  // A failed save keeps the dialog open: the edits are still here
+                  if (!saved) return;
+                  setPendingAction(null);
+                  run();
+                }}
+                disabled={resolvingPending}
+                className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50"
+              >
+                {resolvingPending ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl dark:bg-gray-900">
             <h3 className="text-base font-semibold text-gray-900 dark:text-white">
-              Delete {deleteTarget.name}?
+              {deleteTarget.file?.draft ? "Discard" : "Delete"} {deleteTarget.name}?
             </h3>
             <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
-              This stages the file for deletion. Nothing is removed from GitHub until an admin
-              merges your change request — you can undo it before then.
+              {deleteTarget.file?.draft
+                ? "This file isn't in the repo yet, it only exists as your draft. Discarding it can't be undone."
+                : "This stages the file for deletion. Nothing is removed from GitHub until an admin merges your change request — you can undo it before then."}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <button
@@ -1630,10 +1896,14 @@ export default function Editor({ github, group }: CodeProps) {
                 Cancel
               </button>
               <button
-                onClick={() => stageDelete(deleteTarget)}
+                onClick={() =>
+                  deleteTarget.file?.draft
+                    ? discardNewFile(deleteTarget.file)
+                    : stageDelete(deleteTarget)
+                }
                 className="rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-500"
               >
-                Stage deletion
+                {deleteTarget.file?.draft ? "Discard file" : "Stage deletion"}
               </button>
             </div>
           </div>

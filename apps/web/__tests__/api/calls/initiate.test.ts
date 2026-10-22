@@ -19,6 +19,12 @@ vi.mock("next-auth", () => ({
 const mockPrisma = vi.hoisted(() => ({
   callRoom: {
     create: vi.fn(),
+    // The route checks for a call already in progress before starting one
+    findMany: vi.fn(),
+  },
+  // Starting a group call writes a line to the group's chat
+  groupMessage: {
+    create: vi.fn(),
   },
   group: {
     findUnique: vi.fn(),
@@ -76,6 +82,9 @@ beforeEach(() => {
   });
   // 1:1 calls are friends-only; user-2 is user-1's friend unless a test says not.
   mockPrisma.friendship.findFirst.mockResolvedValue({ id: "f1" });
+  // No call already in progress, unless a test says otherwise
+  mockPrisma.callRoom.findMany.mockResolvedValue([]);
+  mockPrisma.groupMessage.create.mockResolvedValue({});
   __spies.createRoom.mockResolvedValue({ name: "test-room" });
   __spies.deleteRoom.mockResolvedValue(undefined);
   mockFetch.mockResolvedValue({ ok: true });

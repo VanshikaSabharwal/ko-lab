@@ -129,6 +129,15 @@ const nextConfig = {
     ...ASSISTANT_ROUTES.map((source) => ({ source, headers: assistantHeaders })),
     ...EDITOR_ROUTES.map((source) => ({ source, headers: crossOriginIsolationHeaders })),
     {
+      // The Run button's workers are files under /_next/static. An isolated
+      // page (the editor) refuses to start a worker whose own response lacks a
+      // compatible COEP, which surfaced as "The runner failed to start". The
+      // header only matters for documents and workers, so it's inert on the
+      // other static files.
+      source: "/_next/static/:path*",
+      headers: [{ key: "Cross-Origin-Embedder-Policy", value: "credentialless" }],
+    },
+    {
       // CORS for your API routes — only allow your own origin
       source: "/api/(.*)",
       headers: [

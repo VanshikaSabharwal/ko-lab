@@ -149,6 +149,9 @@ const WORKSPACE_BOARD_TYPES = new Set([
   "PLANNING",
   "DB_SCHEMA",
   "UI_DESIGN",
+  // The code editor: who has which file open, so two people editing the same
+  // file can see each other before their changes collide
+  "CODE",
 ]);
 const workspaceClients = new Map<string, Room>();
 const wsWorkspaceRoom = new Map<WebSocket, string>();

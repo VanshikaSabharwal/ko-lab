@@ -1,0 +1,97 @@
+name: Security
+
+# Looks for security problems in three places: our own code (CodeQL), the
+# packages we depend on, and secrets committed by mistake.
+#
+# The app's own defences against floods and malformed requests (rate limits,
+# body-size caps, path traversal) are covered by tests in the CI workflow:
+# apps/web/__tests__/api/middleware.test.ts.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays 03:00 UTC: new vulnerabilities get published for code that hasn't changed
+    - cron: "0 3 * * 1"
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  codeql:
+    name: Code scanning (CodeQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # Adds checks for injection, unsafe redirects, weak crypto and similar
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
+
+  dependency-review:
+    name: New dependencies
+    # Compares a pull request's packages with main, so it only has something
+    # to say on pull requests.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          # Blocks a pull request that adds a package with a known serious hole
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
+
+  audit:
+    name: Known vulnerabilities in packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Reports rather than blocks: the list includes packages whose fix is a
+      # major upgrade, and a check that is always red gets ignored. Dependabot
+      # opens the pull requests; "New dependencies" above stops new ones.
+      - name: npm audit (production packages)
+        run: |
+          {
+            echo "### Known vulnerabilities in production packages"
+            echo
+            echo '```'
+            npm audit --omit=dev || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          npm audit --omit=dev --audit-level=critical \
+            || echo "::warning::npm audit found critical vulnerabilities. See this run's summary."
+
+  secrets:
+    name: Committed secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: a secret removed in a later commit is still in the repo
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

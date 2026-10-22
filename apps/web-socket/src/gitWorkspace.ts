@@ -59,6 +59,30 @@ export async function resolveDefaultBranch(repoUrl: string): Promise<string> {
   return "main";
 }
 
+/** GitHub rejected the token in the remote URL (expired or revoked). */
+export class GitAuthError extends Error {
+  readonly code = "GITHUB_AUTH_EXPIRED";
+  constructor() {
+    super("GitHub access expired — reconnect GitHub");
+  }
+}
+
+function isGitAuthFailure(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /authentication failed|invalid username or (password|token)|could not read username|returned error: 40[13]/i.test(
+    msg,
+  );
+}
+
+/** Git echoes the remote URL in some errors; keep its token out of responses. */
+export function redactCredentials(message: string): string {
+  return message.replace(/(https?:\/\/)[^@\s/]+@/g, "$1");
+}
+
+const PULL_TTL_MS = 15_000;
+/** When each clone last pulled successfully, by directory. */
+const lastPull = new Map<string, number>();
+
 export async function ensureClone(
   groupId: string,
   branch: string,
@@ -68,20 +92,38 @@ export async function ensureClone(
 
   if (await fs.stat(path.join(dir, ".git")).catch(() => null)) {
     // Already cloned — refresh remote URL (token may have rotated) and pull.
+    // Opening the editor, reloading it and starting the terminal each land
+    // here seconds apart; one pull covers them.
+    if (Date.now() - (lastPull.get(dir) ?? 0) < PULL_TTL_MS) return dir;
+
     const git = simpleGit(dir);
     await git.remote(["set-url", "origin", repoUrl]);
-    await git.pull("origin", branch).catch(() => {});
+    // A failed pull normally just means serving the clone as it is. A rejected
+    // token is different: it stays rejected, so the files would go quietly
+    // stale until someone reconnects GitHub.
+    await git.pull("origin", branch).then(
+      () => lastPull.set(dir, Date.now()),
+      (err) => {
+        if (isGitAuthFailure(err)) throw new GitAuthError();
+      },
+    );
     return dir;
   }
 
   await fs.mkdir(path.dirname(dir), { recursive: true });
-  await simpleGit().clone(repoUrl, dir, [
-    "--branch",
-    branch,
-    "--single-branch",
-    "--depth",
-    "1",
-  ]);
+  try {
+    await simpleGit().clone(repoUrl, dir, [
+      "--branch",
+      branch,
+      "--single-branch",
+      "--depth",
+      "1",
+    ]);
+  } catch (err) {
+    if (isGitAuthFailure(err)) throw new GitAuthError();
+    throw err;
+  }
+  lastPull.set(dir, Date.now());
   return dir;
 }
 

@@ -11,9 +11,10 @@ import GroupAvatar from "../../components/GroupAvatar";
 import UserAvatar from "../../components/UserAvatar";
 import GroupPhotoDialog from "../../components/GroupPhotoDialog";
 import { useCall } from "../../components/call/CallProvider";
+import OngoingCallBar from "../../components/call/OngoingCallBar";
 import { useTheme } from "next-themes";
 import { fetchWsToken } from "../../lib/wsAuth";
-import { isSystemMessage, systemMessageText } from "../../lib/systemMessages";
+import { isCallEvent, isSystemMessage, systemMessageText } from "../../lib/systemMessages";
 import ChatBackgroundPicker from "../../components/ChatBackgroundPicker";
 import {
   BG_GROUPS,
@@ -202,6 +203,8 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
         .find(
           (m) =>
             isSystemMessage(m.content) &&
+            // The welcome is for being added, not for the call log
+            !isCallEvent(m.content) &&
             Date.now() - new Date(m.createdAt).getTime() < 24 * 60 * 60 * 1000,
         );
       if (!recent) return;
@@ -747,6 +750,9 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
         </div>
       </div>
 
+      {/* A call you can join, and the reload that brings in its log lines */}
+      <OngoingCallBar groupId={group} onChange={fetchMessages} />
+
       {/* Messages */}
       <div className="flex-grow overflow-y-auto px-4 py-4 space-y-1">
         {messages.length === 0 ? (
@@ -764,11 +770,19 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
             if (isSystemMessage(msg.content)) {
               return (
                 <div key={index} className="my-2 flex justify-center">
-                  <span className="rounded-full bg-gray-200/70 px-3 py-1 text-center text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-200/70 px-3 py-1 text-center text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                    {isCallEvent(msg.content) && <Phone size={11} className="shrink-0" />}
                     {systemMessageText(msg.content, {
                       viewerId: session?.user?.id,
                       senderId: msg.senderId,
                     })}
+                    {/* A call log is a record of when things happened */}
+                    {isCallEvent(msg.content) && msg.createdAt && (
+                      <span className="opacity-70">
+                        ·{" "}
+                        {new Date(msg.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+                      </span>
+                    )}
                   </span>
                 </div>
               );

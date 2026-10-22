@@ -52,14 +52,14 @@ Ranked by severity. Check items off as they're fixed.
 - **Fix:** run `npx prisma migrate dev` and commit the migration alongside the schema.
 
 ### 5. Root `package.json` dependency problems
-- [ ] `"crypto": "^1.0.1"` — this is a **deprecated placeholder npm package**, not Node's built-in `crypto`. Remove it.
+- [x] `"crypto": "^1.0.1"` — this is a **deprecated placeholder npm package**, not Node's built-in `crypto`. Removed (2026-10-08).
 - [ ] App-level deps living at the monorepo root: `framer-motion`, `lucide-react`, `embla-carousel-react`, `js-cookie`, `shepherd.js`, `react-icons`, `react-hot-toast` — move to the app that uses them.
-- [ ] Both `octokit` **and** `@octokit/rest` are installed — pick one.
+- [x] Both `octokit` **and** `@octokit/rest` are installed — pick one. Kept `@octokit/rest` (the only one imported); removed `octokit` (2026-10-08).
 - [ ] Version skew: `prisma`/`@prisma/client` ^5.19.1 at root vs ^5.20.0 in apps/web; `next-auth` duplicated at root and app level.
 
 ### 6. `packages/db` is an empty husk
-- [ ] Contains only `node_modules` — no source, no schema.
-- [ ] `apps/web-socket/tsconfig.json` still maps `@repo/db/*` paths even though the `@repo/db` dependency was removed from its package.json.
+- [x] Contains only `node_modules` — no source, no schema. Folder deleted (2026-10-08).
+- [x] `apps/web-socket/tsconfig.json` still maps `@repo/db/*` paths even though the `@repo/db` dependency was removed from its package.json. The mapping was already gone by 2026-10-08.
 - **Fix:** delete the package and the stale tsconfig path mapping.
 
 ---
@@ -67,7 +67,7 @@ Ranked by severity. Check items off as they're fixed.
 ## 🟡 Stale / abandoned features
 
 ### 7. Email OTP flow is dead code
-- [ ] `apps/web/app/api/auth/send-otp/route.ts` is 100% commented out; `nodemailer` has been removed from deps. Delete the route or revive the flow.
+- [x] `apps/web/app/api/auth/send-otp/route.ts` is 100% commented out; `nodemailer` has been removed from deps. Route deleted (2026-10-08). The signup form still required its "Send OTP" step, so email signup could never finish; that step is removed and the form now submits straight to `/api/auth/signup` (where OTP was already optional). Emails are therefore unverified at signup.
 - [ ] Leftover smell: DMs are keyed on **unverified phone numbers** (`senderPhone`/`recipientPhone`, plus `check-phone-number`, `get-user-number`, `set-phone` routes) even though phone/OTP verification was abandoned. Fragile identity model — feeds problem #1.
 
 ### 8. Call recording ("part 2") planned but never built
@@ -87,7 +87,7 @@ Ranked by severity. Check items off as they're fixed.
   - [ ] decide whether `workspaces-config-v1.json` and root `package-lock.json` are tracked or not.
 
 ### 10. Root-level clutter & duplicate routes
-- [ ] Design docs at repo root (`code-editor-improvements-v1.json`, `ko-lab-call-system-v1.json`, `voice-and-videocall-features.md`) — two are already partly wrong (see #8). Move to `docs/` or delete the ones that no longer match reality.
+- [x] Design docs at repo root (`code-editor-improvements-v1.json`, `ko-lab-call-system-v1.json`, `voice-and-videocall-features.md`) — two are already partly wrong (see #8). Moved to `docs/` with the other design notes (2026-10-08); their contents are unchanged, so the stale parts in #8 still apply.
 - [ ] `apps/web/app/chat-room/page.tsx` is a thin wrapper around `<Chats />` while a separate `chat/[chatId]` route exists — check whether both are needed.
 
 ---

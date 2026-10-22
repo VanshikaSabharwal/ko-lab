@@ -17,7 +17,17 @@ vi.mock("../../app/lib/gitClient", () => ({
   readFile: vi.fn(),
 }));
 
+const { findDraft } = vi.hoisted(() => ({ findDraft: vi.fn() }));
+vi.mock("../../app/lib/prisma", () => ({
+  default: { modifiedFiles: { findUnique: findDraft } },
+}));
+
+vi.mock("../../app/lib/draftStore", () => ({
+  draftContentFor: vi.fn(),
+}));
+
 import { POST } from "../../app/api/file-content/route";
+import { draftContentFor } from "../../app/lib/draftStore";
 import { getSessionUser, isGroupMember } from "../../app/lib/apiAuth";
 import { readFile, resolveBranch } from "../../app/lib/gitClient";
 
@@ -35,6 +45,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   (getSessionUser as ReturnType<typeof vi.fn>).mockResolvedValue({ id: "u1" });
   (isGroupMember as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+  findDraft.mockResolvedValue(null);
 });
 
 describe("POST /api/file-content", () => {
@@ -101,6 +112,45 @@ describe("POST /api/file-content", () => {
     expect(body.isImage).toBe(false);
     // Non-image binaries don't get downloadUrl from the route
     expect(body.downloadUrl).toBeUndefined();
+  });
+
+  it("serves the caller's saved draft instead of the repo version", async () => {
+    findDraft.mockResolvedValue({ deleted: false, content: null });
+    (draftContentFor as ReturnType<typeof vi.fn>).mockResolvedValue("my edit");
+
+    const body = await (await POST(request("src/app.js"))).json();
+
+    expect(body).toMatchObject({ content: "my edit", name: "app.js", draft: true });
+    expect(findDraft.mock.calls[0]![0].where.userId_groupId_path).toEqual({
+      userId: "u1",
+      groupId: "g1",
+      path: "src/app.js",
+    });
+  });
+
+  it("serves a draft-only file even though the repo read fails", async () => {
+    findDraft.mockResolvedValue({ deleted: false, content: null });
+    (draftContentFor as ReturnType<typeof vi.fn>).mockResolvedValue("brand new");
+    (readFile as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("ENOENT"));
+
+    const res = await POST(request("src/new.js"));
+
+    expect(res.status).toBe(200);
+    expect((await res.json()).content).toBe("brand new");
+  });
+
+  it("reads the repo when the draft is a staged deletion", async () => {
+    findDraft.mockResolvedValue({ deleted: true, content: null });
+    (readFile as ReturnType<typeof vi.fn>).mockResolvedValue({
+      content: "original",
+      size: 8,
+      name: "a.txt",
+    });
+
+    const body = await (await POST(request("a.txt"))).json();
+
+    expect(body.content).toBe("original");
+    expect(body.draft).toBeUndefined();
   });
 
   it("forwards ref to resolveBranch", async () => {

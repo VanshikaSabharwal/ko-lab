@@ -4,7 +4,6 @@ import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 import Link from "next/link";
-import { GrPowerCycle } from "react-icons/gr";
 
 const SignUp = () => {
   const router = useRouter();
@@ -12,54 +11,7 @@ const SignUp = () => {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
-  const [otp, setOtp] = useState("");
-  const [isOtpSent, setIsOtpSent] = useState(false);
   const [userExist, setUserExist] = useState(false);
-
-  const handleSendOtp = async () => {
-    const toastId = toast.loading("Sending OTP...");
-    try {
-      const response = await fetch("/api/auth/send-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, phone }),
-      });
-      if (response.ok) {
-        setIsOtpSent(true);
-        toast.success("OTP sent to your email");
-      } else {
-        const result = await response.json();
-        toast.error(result.error || "Failed to send OTP");
-      }
-    } catch (err) {
-      console.error(err);
-      toast.error("An error occurred while sending OTP");
-    } finally {
-      toast.dismiss(toastId);
-    }
-  };
-
-  const handleResendOtp = async () => {
-    const toastId = toast.loading("Resending OTP...");
-    try {
-      const response = await fetch("/api/auth/send-otp", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, phone }),
-      });
-      if (response.ok) {
-        toast.success("OTP resent!");
-      } else {
-        const result = await response.json();
-        toast.error(result.error || "Failed to resend OTP");
-      }
-    } catch (error) {
-      console.error(error);
-      toast.error("An error occurred while resending OTP");
-    } finally {
-      toast.dismiss(toastId);
-    }
-  };
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,7 +20,7 @@ const SignUp = () => {
       const response = await fetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, phone, password, otp }),
+        body: JSON.stringify({ name, email, phone, password }),
       });
       const result = await response.json();
       if (response.ok) {
@@ -155,49 +107,12 @@ const SignUp = () => {
               />
             </div>
 
-            {isOtpSent && (
-              <div>
-                <label htmlFor="otp" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">
-                  OTP
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    id="otp"
-                    placeholder="Enter the OTP"
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value)}
-                    className="flex-1 px-3 py-2.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={handleResendOtp}
-                    title="Resend OTP"
-                    className="flex items-center justify-center w-10 h-10 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
-                  >
-                    <GrPowerCycle className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {!isOtpSent ? (
-              <button
-                type="button"
-                onClick={handleSendOtp}
-                className="w-full py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-              >
-                Send OTP
-              </button>
-            ) : (
-              <button
-                type="submit"
-                className="w-full py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-              >
-                Create account
-              </button>
-            )}
+            <button
+              type="submit"
+              className="w-full py-2.5 text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+            >
+              Create account
+            </button>
 
             {userExist && (
               <Link

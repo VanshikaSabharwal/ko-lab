@@ -1,0 +1,7 @@
+{
+  "$comment": "This file is yours. Promptera never overwrites it.\nAdd knowledge static analysis cannot infer; it is merged over the\ngenerated context and used when improving prompts.\n\nfiles: { \"src/auth.ts\": { note: \"...\", importance: \"high\" } }\nimportance: high | normal | low. exclude: true hides a file from retrieval.",
+  "project": {
+    "note": ""
+  },
+  "files": {}
+}

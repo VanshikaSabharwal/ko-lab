@@ -1,0 +1,30 @@
+version: 2
+
+# Dependabot opens pull requests to update packages. Security fixes come as
+# soon as they are published; routine updates once a week, grouped so they
+# arrive as a couple of pull requests rather than dozens.
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # Small, low-risk bumps together in one pull request
+      minor-and-patch:
+        update-types: [minor, patch]
+    # Major upgrades (Next.js, Prisma, Tailwind...) need a person to plan them;
+    # security fixes are not affected by this and still come through.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]

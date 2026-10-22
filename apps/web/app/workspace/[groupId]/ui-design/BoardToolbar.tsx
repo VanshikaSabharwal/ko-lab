@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import { getNodesBounds, getViewportForBounds, useReactFlow } from "@xyflow/react";
 import { useTheme } from "next-themes";
 import { toPng } from "html-to-image";
-import { Undo2, Redo2, Magnet, ImageDown, Group, Ungroup, Eraser } from "lucide-react";
+import { Undo2, Redo2, ImageDown, Group, Ungroup, Eraser } from "lucide-react";
 import toast from "react-hot-toast";
 
 interface BoardToolbarProps {
@@ -12,8 +12,6 @@ interface BoardToolbarProps {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
-  snap: boolean;
-  onToggleSnap: () => void;
   canGroup: boolean;
   canUngroup: boolean;
   onGroup: () => void;
@@ -30,8 +28,6 @@ export default function BoardToolbar({
   canRedo,
   onUndo,
   onRedo,
-  snap,
-  onToggleSnap,
   canGroup,
   canUngroup,
   onGroup,
@@ -120,13 +116,6 @@ export default function BoardToolbar({
         title="Ungroup (Ctrl+Shift+G)"
       >
         <Ungroup size={13} /> <span className="hidden sm:inline">Ungroup</span>
-      </button>
-      <button
-        className={`${btnCls} ${snap ? "border-blue-600/60 text-blue-300" : ""}`}
-        onClick={onToggleSnap}
-        title="Snap to grid"
-      >
-        <Magnet size={13} /> <span className="hidden sm:inline">Snap {snap ? "on" : "off"}</span>
       </button>
       <button className={btnCls} onClick={exportPng} disabled={exporting} title="Export board as PNG">
         <ImageDown size={13} />

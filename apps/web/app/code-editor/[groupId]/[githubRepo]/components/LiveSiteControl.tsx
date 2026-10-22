@@ -21,6 +21,11 @@ interface LiveSiteControlProps {
   branch: string;
   /** The open file's unsaved text, published instead of its saved version. */
   unsaved?: { path: string; content: string };
+  /**
+   * Set for a Node server app (package.json, no index.html). Such an app has
+   * to run, not just be served, so Make it live points to the terminal.
+   */
+  onRunServerApp?: () => void;
 }
 
 function timeLeft(iso: string | null | undefined, now: number): number {
@@ -49,7 +54,7 @@ async function copy(text: string, label: string) {
  * Toolbar control for "Make it live": deploy the static site, see how long the
  * private link has left, share it publicly for a chosen time, or take it down.
  */
-export default function LiveSiteControl({ live, branch, unsaved }: LiveSiteControlProps) {
+export default function LiveSiteControl({ live, branch, unsaved, onRunServerApp }: LiveSiteControlProps) {
   const { preview, deploying } = live;
   const [open, setOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -77,6 +82,30 @@ export default function LiveSiteControl({ live, branch, unsaved }: LiveSiteContr
 
   const deploy = async () => {
     setOpen(false);
+    if (onRunServerApp) {
+      toast(
+        (t) => (
+          <span className="flex flex-col gap-2 text-sm">
+            <span>
+              This is a Node server app, so it needs to run rather than be hosted as files. Run it in
+              the Terminal to see it live.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                toast.dismiss(t.id);
+                onRunServerApp();
+              }}
+              className="self-start rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
+            >
+              Open Terminal
+            </button>
+          </span>
+        ),
+        { id: "live-server-app", duration: 10_000 },
+      );
+      return;
+    }
     // Not opened automatically: a window.open after the await is popup-blocked
     if (await live.makeLive(branch, unsaved)) setNow(Date.now());
   };

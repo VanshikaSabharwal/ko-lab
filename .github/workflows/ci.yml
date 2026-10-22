@@ -1,0 +1,149 @@
+name: CI
+
+# Runs on every push to main and on every pull request: is the code correct,
+# does it build, and does the database schema match its migrations?
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push to the same branch makes the older run pointless
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NEXT_TELEMETRY_DISABLED: "1"
+
+jobs:
+  checks:
+    name: Types, lint and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Generate Prisma client
+        run: npx prisma generate
+        working-directory: apps/web
+      - name: Type-check web
+        run: npx tsc --noEmit -p .
+        working-directory: apps/web
+      - name: Type-check web-socket
+        run: npx tsc --noEmit -p .
+        working-directory: apps/web-socket
+      - name: Lint
+        run: npx next lint
+        working-directory: apps/web
+      - name: Tests
+        run: npm test
+        working-directory: apps/web
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # Needs no secrets: nothing is read from the environment at build time
+      - name: Build web
+        run: npm run build
+        working-directory: apps/web
+      - name: Build web-socket
+        run: npm run build
+        working-directory: apps/web-socket
+
+  migrations:
+    name: Schema matches migrations
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: kolab
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/kolab
+      SHADOW_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/shadow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # The migrations must apply cleanly to an empty database...
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+        working-directory: apps/web
+      # ...and leave it exactly as schema.prisma describes. A schema change
+      # without a migration passes every test locally (the Prisma client is
+      # generated from the schema) and then fails in production with "column
+      # does not exist".
+      - name: Check for schema changes without a migration
+        working-directory: apps/web
+        run: |
+          # Prisma replays the migrations into this scratch database to compare;
+          # it has to exist already.
+          PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE shadow'
+          set +e
+          npx prisma migrate diff \
+            --from-migrations prisma/migrations \
+            --to-schema-datamodel prisma/schema.prisma \
+            --shadow-database-url "$SHADOW_DATABASE_URL" \
+            --exit-code
+          code=$?
+          if [ "$code" -eq 2 ]; then
+            echo "::error::prisma/schema.prisma has changes with no migration. Run 'npx prisma migrate dev --name <what-changed>' in apps/web and commit the new folder."
+            exit 1
+          fi
+          exit "$code"
+
+  storage:
+    name: Storage tests (LocalStack)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      localstack:
+        # Pinned to a release that runs without an auth token
+        image: localstack/localstack:3.8.1
+        env:
+          SERVICES: s3
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "curl -sf http://localhost:4566/_localstack/health"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Storage tests
+        run: npm run test:storage
+        working-directory: apps/web

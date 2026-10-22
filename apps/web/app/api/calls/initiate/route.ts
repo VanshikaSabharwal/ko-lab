@@ -4,6 +4,7 @@ import { createLiveKitToken, ensureLiveKitRoom } from "../../../lib/livekit";
 import { getServerSession } from "next-auth";
 import { authOptions } from "../../../lib/auth";
 import { signRingTicket } from "../../../lib/ringTicket";
+import { findOngoingGroupCall, logCallEvent } from "../../../lib/calls";
 
 export async function POST(req: Request) {
   const session = await getServerSession(authOptions);
@@ -46,6 +47,16 @@ export async function POST(req: Request) {
       if (!everyone.has(session.user.id)) {
         return NextResponse.json({ error: "Not a member of this group" }, { status: 403 });
       }
+      // One call per group. Starting a second while one is going would split
+      // the group across two rooms; the client joins the existing one instead.
+      const ongoing = await findOngoingGroupCall(groupId);
+      if (ongoing) {
+        return NextResponse.json(
+          { error: "A call is already in progress", existingCallId: ongoing.callId },
+          { status: 409 },
+        );
+      }
+
       // The caller is added separately below.
       everyone.delete(session.user.id);
       inviteeIds = [...everyone];
@@ -88,7 +99,7 @@ export async function POST(req: Request) {
         groupId: groupId || null,
         participants: {
           create: [
-            { userId: session.user.id },
+            { userId: session.user.id, joinedAt: new Date() },
             ...inviteeIds.map((userId) => ({ userId })),
           ],
         },
@@ -97,6 +108,10 @@ export async function POST(req: Request) {
         participants: true,
       },
     });
+
+    if (groupId) {
+      await logCallEvent(groupId, { id: session.user.id, name: session.user.name }, "started");
+    }
 
     const token = await createLiveKitToken(session.user.id, roomName, true, session.user.name ?? undefined);
 

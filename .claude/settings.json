@@ -26,7 +26,17 @@
       "Bash(grep -v \"^$\")",
       "Bash(curl -s -m 3 localhost:4566/_localstack/health)",
       "Bash(docker exec *)",
-      "Bash(docker compose *)"
+      "Bash(docker compose *)",
+      "Bash(curl -sI localhost:3000/code-editor/x/y)",
+      "Bash(curl -sI localhost:3000/)",
+      "Bash(curl -s -D - -o /dev/null localhost:3000/)",
+      "Bash(node -e \"import\\('./next.config.mjs'\\).then\\(async m=>{const h=await m.default.headers\\(\\);console.log\\('rules:',h.length, h.map\\(r=>r.source\\).join\\(' | '\\)\\)}\\).catch\\(e=>console.log\\('ERR',e.message\\)\\)\")",
+      "Bash(grep -oE \"\\(Warning|Error\\): .*  [a-z@/-]+$\")",
+      "Bash(awk '{print $1, $NF}')",
+      "Bash(cp app/workspace/[groupId]/ui-design/UiPrimitiveNode.tsx /tmp/claude-1000/-home-vanshika-personalProjects-ko-lab-work-ko-lab/e1d8aada-02a8-4bee-836c-2ead72dbd4a1/scratchpad/UiPrimitiveNode.new.tsx)",
+      "Bash(git show *)",
+      "Bash(sed -n 1,19p app/workspace/[groupId]/ui-design/UiDesign.tsx)",
+      "Bash(sed -n 60,100p app/workspace/[groupId]/ui-design/UiDesign.tsx)"
     ]
   }
 }

@@ -15,6 +15,11 @@ import {
 /** Set before the one-time reload that turns on cross-origin isolation. */
 export const OPEN_TERMINAL_AFTER_RELOAD_KEY = "kolab:openTerminal";
 
+const PREVIEW_SHARE_KEY = "kolab:terminalPreviewShare";
+const DEFAULT_PREVIEW_SHARE = 0.5;
+const MIN_PREVIEW_SHARE = 0.15;
+const MAX_PREVIEW_SHARE = 0.85;
+
 interface TerminalPanelProps {
   groupId: string;
   branch: string;
@@ -22,6 +27,12 @@ interface TerminalPanelProps {
   active: boolean;
   /** True when the open file has unsaved edits a page reload would lose. */
   hasUnsavedChanges: boolean;
+  fontSize: number;
+  /** The editor theme's background and text colours. */
+  background: string;
+  foreground: string;
+  /** Suggested instead of the command guessed from package.json; "" to guess. */
+  startCommand: string;
 }
 
 type Phase = "idle" | "starting" | "ready" | "error";
@@ -31,7 +42,16 @@ interface Server {
   url: string;
 }
 
-export default function TerminalPanel({ groupId, branch, active, hasUnsavedChanges }: TerminalPanelProps) {
+export default function TerminalPanel({
+  groupId,
+  branch,
+  active,
+  hasUnsavedChanges,
+  fontSize,
+  background,
+  foreground,
+  startCommand,
+}: TerminalPanelProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const shellRef = useRef<WebContainerProcess | null>(null);
@@ -55,13 +75,30 @@ export default function TerminalPanel({ groupId, branch, active, hasUnsavedChang
       const loaded = await loadProjectFiles(groupId, branch, setStatus);
       const { paths } = loaded;
       setLoadedBranch(loaded.branch);
-      const cmd = await suggestedCommand(paths);
+      const cmd = startCommand.trim() || (await suggestedCommand(paths));
       term.writeln(`\x1b[2mLoaded ${paths.length} files from ${loaded.branch} (with your saved drafts).\x1b[0m`);
       if (cmd) term.writeln(`\x1b[2mTry: \x1b[0m\x1b[36m${cmd}\x1b[0m`);
       term.writeln("");
     },
-    [groupId, branch],
+    [groupId, branch, startCommand],
   );
+
+  // The terminal is created once, so a later change of size is applied to it
+  const fontSizeRef = useRef(fontSize);
+  fontSizeRef.current = fontSize;
+  useEffect(() => {
+    if (!termRef.current) return;
+    termRef.current.options.fontSize = fontSize;
+    fitRef.current?.();
+  }, [fontSize]);
+
+  // Same for its colours, which follow the editor theme like the rest of the IDE
+  const colorsRef = useRef({ background, foreground });
+  colorsRef.current = { background, foreground };
+  useEffect(() => {
+    if (!termRef.current) return;
+    termRef.current.options.theme = { background, foreground, cursor: foreground };
+  }, [background, foreground]);
 
   const start = useCallback(async () => {
     if (startedRef.current || !hostRef.current) return;
@@ -76,9 +113,9 @@ export default function TerminalPanel({ groupId, branch, active, hasUnsavedChang
       const term = new Terminal({
         convertEol: true,
         cursorBlink: true,
-        fontSize: 13,
+        fontSize: fontSizeRef.current,
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-        theme: { background: "#0b0f19", foreground: "#e5e7eb" },
+        theme: { ...colorsRef.current, cursor: colorsRef.current.foreground },
       });
       const fit = new FitAddon();
       term.loadAddon(fit);
@@ -128,6 +165,55 @@ export default function TerminalPanel({ groupId, branch, active, hasUnsavedChang
     if (active && unsupported === null && phase === "idle") void start();
   }, [active, unsupported, phase, start]);
 
+  // ── Terminal / preview split ──
+  // Share of the height given to the preview; remembered in this browser.
+  const splitRef = useRef<HTMLDivElement>(null);
+  const [previewShare, setPreviewShare] = useState(DEFAULT_PREVIEW_SHARE);
+  const [resizingPreview, setResizingPreview] = useState(false);
+  useEffect(() => {
+    try {
+      const stored = Number(localStorage.getItem(PREVIEW_SHARE_KEY));
+      if (stored >= MIN_PREVIEW_SHARE && stored <= MAX_PREVIEW_SHARE) setPreviewShare(stored);
+    } catch {
+      /* storage blocked: keep the default */
+    }
+  }, []);
+
+  const savePreviewShare = (share: number) => {
+    const clamped = Math.min(MAX_PREVIEW_SHARE, Math.max(MIN_PREVIEW_SHARE, share));
+    setPreviewShare(clamped);
+    try {
+      localStorage.setItem(PREVIEW_SHARE_KEY, String(clamped));
+    } catch {
+      /* fine: applies for this visit */
+    }
+    return clamped;
+  };
+
+  const startPreviewResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    const box = splitRef.current?.getBoundingClientRect();
+    if (!box) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setResizingPreview(true);
+    const handle = e.currentTarget;
+    const onMove = (ev: PointerEvent) => {
+      // The preview gets everything below the pointer
+      const share = (box.bottom - ev.clientY) / box.height;
+      setPreviewShare(Math.min(MAX_PREVIEW_SHARE, Math.max(MIN_PREVIEW_SHARE, share)));
+    };
+    const onUp = (ev: PointerEvent) => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointercancel", onUp);
+      setResizingPreview(false);
+      savePreviewShare((box.bottom - ev.clientY) / box.height);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointercancel", onUp);
+  };
+
   // Keep the terminal sized to its box (also when the tab becomes visible again)
   useEffect(() => {
     const host = hostRef.current;
@@ -171,7 +257,7 @@ export default function TerminalPanel({ groupId, branch, active, hasUnsavedChang
   const preview = servers.find((s) => s.port === previewPort);
 
   return (
-    <div className={active ? "flex min-h-0 min-w-0 flex-1 flex-col bg-[#0b0f19]" : "hidden"}>
+    <div className={active ? "flex min-h-0 min-w-0 flex-1 flex-col bg-gray-950" : "hidden"}>
       <div className="flex items-center gap-2 border-b border-gray-700/50 bg-gray-800/80 px-4 py-2 text-xs text-gray-300">
         <SquareTerminal size={14} className="text-gray-400" />
         <span className="font-medium">Terminal</span>
@@ -246,10 +332,29 @@ export default function TerminalPanel({ groupId, branch, active, hasUnsavedChang
         </Notice>
       ) : null}
 
-      <div className={`flex min-h-0 flex-1 flex-col ${unsupported || phase === "error" ? "hidden" : ""}`}>
+      <div
+        ref={splitRef}
+        className={`flex min-h-0 flex-1 flex-col ${unsupported || phase === "error" ? "hidden" : ""}`}
+      >
         <div ref={hostRef} className="min-h-0 flex-1 overflow-hidden p-2" />
         {preview && (
-          <div className="flex h-1/2 min-h-[180px] flex-col border-t border-gray-700">
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize preview"
+            title="Drag to resize · double-click to reset"
+            onPointerDown={startPreviewResize}
+            onDoubleClick={() => savePreviewShare(DEFAULT_PREVIEW_SHARE)}
+            className="group flex h-2 shrink-0 cursor-row-resize touch-none items-center justify-center border-t border-gray-700 bg-gray-800 hover:bg-blue-600/40"
+          >
+            <span className="h-0.5 w-10 rounded-full bg-gray-500 group-hover:bg-blue-300" />
+          </div>
+        )}
+        {preview && (
+          <div
+            className="flex min-h-[80px] shrink-0 flex-col"
+            style={{ height: `${Math.round(previewShare * 100)}%` }}
+          >
             <div className="flex items-center gap-2 bg-gray-800 px-3 py-1 text-xs text-gray-400">
               <span className="truncate">localhost:{preview.port}</span>
               <button onClick={() => setPreviewPort(null)} className="ml-auto rounded p-0.5 hover:bg-gray-700" title="Hide preview">
@@ -260,7 +365,8 @@ export default function TerminalPanel({ groupId, branch, active, hasUnsavedChang
               key={preview.url}
               src={preview.url}
               title={`App on port ${preview.port}`}
-              className="min-h-0 flex-1 bg-white"
+              // While dragging, the iframe would swallow pointer moves and stall the drag
+              className={`min-h-0 flex-1 bg-white ${resizingPreview ? "pointer-events-none" : ""}`}
               allow="cross-origin-isolated"
             />
           </div>
