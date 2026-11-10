@@ -34,7 +34,7 @@
     "uuid": "^10.0.0"
   },
   "peerDependencies": {
-    "next": "^14.2.13",
+    "next": "^14.2.35",
     "next-auth": "^4.24.7"
   }
 }
