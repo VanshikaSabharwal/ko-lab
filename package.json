@@ -11,8 +11,8 @@
     "db:web": "cd apps/web && npx prisma generate && cd ../.."
   },
   "devDependencies": {
-    "prettier": "^3.2.5",
-    "turbo": "^2.1.1",
+    "prettier": "^3.9.10",
+    "turbo": "^2.11.10",
     "typescript": "^5.4.5"
   },
   "engines": {
