@@ -2,7 +2,7 @@
 
 import React from "react";
 import { GitBranch, CircleAlert, TriangleAlert, Bell } from "lucide-react";
-import { getLanguageLabel, hasLinter } from "../lib/fileTypes";
+import { getLanguageLabel, hasLinter, hasSyntaxLinter } from "../lib/fileTypes";
 
 interface EditorStatusBarProps {
   branch: string;
@@ -35,7 +35,13 @@ export default function EditorStatusBar({
 
         <span
           className="flex items-center gap-2"
-          title={checked ? "Problems in this file" : "No linter for this language"}
+          title={
+            !checked
+              ? "No linter for this language"
+              : hasSyntaxLinter(fileName)
+                ? "Syntax errors only (type errors are not checked)"
+                : "Problems in this file"
+          }
         >
           <span className="flex items-center gap-1">
             <CircleAlert size={11} />

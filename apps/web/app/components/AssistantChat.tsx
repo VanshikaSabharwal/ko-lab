@@ -13,12 +13,15 @@ import {
   MicOff,
   Coins,
   Plus,
+  Check,
+  X,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import AssistantMarkdown from "./AssistantMarkdown";
 import {
   useAssistantChat,
   type AssistantMessage,
+  type ChatAction,
 } from "../lib/useAssistantChat";
 
 // Speech Recognition API types
@@ -205,6 +208,76 @@ function QuickPrompts({ onPick }: { onPick: (prompt: string) => void }) {
   );
 }
 
+const ACTION_STATUS_LABEL: Record<ChatAction["status"], string> = {
+  PENDING: "Needs your OK",
+  WORKING: "Applying…",
+  EXECUTED: "Done",
+  CANCELLED: "Cancelled",
+  FAILED: "Failed",
+  EXPIRED: "Expired",
+};
+
+/** A change the assistant prepared; nothing happens until it's confirmed. */
+function ActionCard({ action, chat }: { action: ChatAction; chat: Chat }) {
+  const { preview, status, outcome } = action;
+  const tone =
+    status === "EXECUTED"
+      ? "text-green-700 dark:text-green-300"
+      : status === "FAILED" || status === "EXPIRED"
+        ? "text-red-700 dark:text-red-300"
+        : "text-gray-500 dark:text-gray-400";
+
+  return (
+    <div className="mt-2 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 p-3 text-sm">
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-semibold text-gray-900 dark:text-gray-100">{preview.title}</p>
+        <span className={`shrink-0 text-[11px] font-medium ${tone}`}>
+          {ACTION_STATUS_LABEL[status]}
+        </span>
+      </div>
+      {preview.details.length > 0 && (
+        <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs">
+          {preview.details.map((d) => (
+            <React.Fragment key={d.label}>
+              <dt className="text-gray-500 dark:text-gray-400">{d.label}</dt>
+              <dd className="text-gray-800 dark:text-gray-200 break-words">{d.value}</dd>
+            </React.Fragment>
+          ))}
+        </dl>
+      )}
+      {outcome && status !== "PENDING" && (
+        <p className={`mt-2 text-xs ${tone}`}>{outcome}</p>
+      )}
+      {(status === "PENDING" || status === "WORKING") && (
+        <div className="mt-2.5 flex gap-2">
+          <button
+            type="button"
+            onClick={() => chat.confirmAction(action.id)}
+            disabled={status === "WORKING"}
+            className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50 transition"
+          >
+            {status === "WORKING" ? (
+              <Loader2 className="w-3 h-3 animate-spin" />
+            ) : (
+              <Check className="w-3 h-3" />
+            )}
+            Confirm
+          </button>
+          <button
+            type="button"
+            onClick={() => chat.cancelAction(action.id)}
+            disabled={status === "WORKING"}
+            className="inline-flex items-center gap-1 rounded-md border border-gray-300 dark:border-gray-600 px-2.5 py-1 text-xs font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 transition"
+          >
+            <X className="w-3 h-3" />
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AssistantMessageList({
   chat,
   onPick,
@@ -246,7 +319,12 @@ export function AssistantMessageList({
               }`}
             >
               {msg.role === "assistant" ? (
-                <AssistantMarkdown content={msg.content} />
+                <>
+                  <AssistantMarkdown content={msg.content} />
+                  {msg.actions?.map((action) => (
+                    <ActionCard key={action.id} action={action} chat={chat} />
+                  ))}
+                </>
               ) : (
                 msg.content
               )}
@@ -395,7 +473,7 @@ export default function AssistantChat() {
           <ChatActions chat={chat} />
         </div>
         <p className="text-[15px] text-gray-600 dark:text-gray-400 mt-2">
-          Ask about your groups, tasks, or recent changes
+          Ask about your groups and tasks, or have me make changes for you to confirm
         </p>
       </div>
 

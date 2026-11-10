@@ -6,6 +6,16 @@ import {
   DAILY_CREDITS,
   type AssistantCredits,
 } from "../../lib/assistantCredits";
+import {
+  ActionError,
+  MAX_ACTIONS_PER_REPLY,
+  isWriteTool,
+  proposeAction,
+  writeTools,
+  type ProposedAction,
+  type WriteToolInput,
+} from "../../lib/assistantActions";
+import { todayIn } from "../../lib/parseDate";
 
 const groq = new Groq({
   apiKey: process.env.GROQ_API_KEY,
@@ -79,11 +89,12 @@ const tools = [
       },
     },
   },
+  ...writeTools,
 ];
 
 // Without this the model treats the user as the developer and narrates
 // internal failures (Prisma errors, schema advice) back to them.
-const SYSTEM_PROMPT = `You are the Ko-Lab Assistant, built into Ko-Lab, a platform for collaborative coding, group chat, and task planning.
+const BASE_PROMPT = `You are the Ko-Lab Assistant, built into Ko-Lab, a platform for collaborative coding, group chat, and task planning.
 
 You're talking to a Ko-Lab user, not a developer. Use the tools to answer questions about their groups, tasks, and recent activity.
 
@@ -97,23 +108,58 @@ Formatting:
 
 For "What did I miss?", list the user's groups, then check the activity of their most active groups and summarize new change requests and file changes, grouped by group.
 
-If a tool returns an error, don't explain or debug it. Say briefly that you couldn't load that information right now, and answer with whatever else you have.`;
+If a tool that reads information returns an error, don't explain or debug it. Say briefly that you couldn't load that information right now, and answer with whatever else you have.
+
+Making changes:
+- You can create tasks (create_task), change them (update_task), mark them done (close_task), add someone to a group by email or phone (add_group_member), merge or reject change requests (merge_change_request, reject_change_request; rejecting with a reason is how to ask the author for changes), post in a group's chat (send_group_message), and notify everyone in a group (notify_team). Only do this when the user asks for that change.
+- For messages and notifications, use the user's own words. Don't add anything they didn't ask for.
+- These tools don't change anything yet. Each one prepares a change that the user confirms with a button under your reply. Afterwards, say in one short line what you prepared and that they can confirm it below. Never say it's done.
+- Pass group, task, and people names the way the user said them (or ids from earlier results). Pass dates the way the user said them, like "Friday".
+- If one of these tools says several things match, or that a name wasn't found, ask the user to clarify. If it says they aren't allowed, tell them why in plain words.`;
+
+function systemPrompt(today: string): string {
+  const weekday = new Date(`${today}T12:00:00Z`).toLocaleDateString("en-US", {
+    weekday: "long",
+    timeZone: "UTC",
+  });
+  return `${BASE_PROMPT}\n\nToday is ${weekday}, ${today}.`;
+}
 
 type ToolName = "list_my_groups" | "list_my_tasks" | "get_group_activity" | "get_blocked_by";
 
-interface ToolInput {
+interface ToolInput extends WriteToolInput {
   group_id?: string;
   task_id?: string;
   limit?: number;
 }
 
+interface RunContext {
+  userId: string;
+  conversationId: string | null;
+  today: string;
+  /** Write proposals made during this reply, returned to the chat as cards. */
+  proposed: ProposedAction[];
+}
+
 async function executeToolCall(
-  toolName: ToolName,
+  toolName: string,
   toolInput: ToolInput,
-  userId: string
+  ctx: RunContext
 ): Promise<unknown> {
+  const { userId } = ctx;
   try {
-    switch (toolName) {
+    if (isWriteTool(toolName)) {
+      if (ctx.proposed.length >= MAX_ACTIONS_PER_REPLY) {
+        throw new ActionError(
+          `At most ${MAX_ACTIONS_PER_REPLY} changes can be prepared at once. Ask the user to confirm these first.`
+        );
+      }
+      const action = await proposeAction(toolName, toolInput, ctx);
+      ctx.proposed.push(action);
+      return { status: "awaiting_user_confirmation", change: action.preview };
+    }
+
+    switch (toolName as ToolName) {
       case "list_my_groups": {
         // Get all groups where user is owner or member
         const groups = await prisma.group.findMany({
@@ -349,11 +395,11 @@ export async function GET() {
 
 async function runAssistant(
   messages: { role: string; content: string }[],
-  userId: string
+  ctx: RunContext
 ): Promise<{ text: string; finishReason: string | undefined }> {
   // Accumulates across tool rounds so later calls still see earlier results
   const conversation: any[] = [
-    { role: "system", content: SYSTEM_PROMPT },
+    { role: "system", content: systemPrompt(ctx.today) },
     ...messages.map((m) => ({ role: m.role, content: m.content })),
   ];
 
@@ -386,9 +432,13 @@ async function runAssistant(
           };
         }
 
-        const toolName = toolCall.function.name as ToolName;
-        const toolInput = JSON.parse(toolCall.function.arguments) as ToolInput;
-        const result = await executeToolCall(toolName, toolInput, userId);
+        let toolInput: ToolInput;
+        try {
+          toolInput = JSON.parse(toolCall.function.arguments || "{}") as ToolInput;
+        } catch {
+          return { tool_call_id: toolCall.id, result: { error: "Arguments were not valid JSON" } };
+        }
+        const result = await executeToolCall(toolCall.function.name, toolInput, ctx);
 
         return {
           tool_call_id: toolCall.id,
@@ -503,9 +553,15 @@ export async function POST(request: Request) {
       );
     }
 
+    const ctx: RunContext = {
+      userId,
+      conversationId,
+      today: todayIn(typeof body.timeZone === "string" ? body.timeZone : undefined),
+      proposed: [],
+    };
     let result: { text: string; finishReason: string | undefined };
     try {
-      result = await runAssistant(messages, userId);
+      result = await runAssistant(messages, ctx);
     } catch (error) {
       // The user got no answer, so don't charge them for the message
       await prisma.assistantDailyUsage.updateMany({
@@ -516,10 +572,14 @@ export async function POST(request: Request) {
     }
 
     return json({
-      response: result.text,
+      // The model sometimes ends on the tool call with no text of its own
+      response:
+        result.text ||
+        (ctx.proposed.length ? "Here's what I've prepared. Confirm below to apply it." : ""),
       finishReason: result.finishReason,
       conversationId,
       credits: spent.credits,
+      actions: ctx.proposed,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

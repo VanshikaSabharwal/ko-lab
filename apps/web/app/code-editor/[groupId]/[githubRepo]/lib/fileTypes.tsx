@@ -179,6 +179,15 @@ export function getLanguageLabel(fileName: string): string {
  * file was checked and found clean.
  */
 export function hasLinter(fileName: string): boolean {
+  return hasJsonLinter(fileName) || hasSyntaxLinter(fileName);
+}
+
+/** JS/TS files get syntax errors (not type errors) from the parse tree. */
+export function hasSyntaxLinter(fileName: string): boolean {
+  return /\.(m|c)?(js|jsx|ts|tsx)$/i.test(fileName) && !/\.d\.ts$/i.test(fileName);
+}
+
+export function hasJsonLinter(fileName: string): boolean {
   const ext = "." + fileName.split(".").pop()?.toLowerCase();
   return [".json", ".jsonc"].includes(ext);
 }

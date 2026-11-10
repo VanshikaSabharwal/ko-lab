@@ -43,6 +43,7 @@ model User {
   planningAssignments    PlanningAssignee[]      @relation("UserPlanningAssignments")
   assistantConversations AssistantConversation[] @relation("UserAssistantConversations")
   assistantDailyUsage    AssistantDailyUsage[]   @relation("UserAssistantDailyUsage")
+  assistantActions       AssistantAction[]       @relation("UserAssistantActions")
 
   // Add timestamps
   createdAt DateTime @default(now())
@@ -76,6 +77,38 @@ model AssistantDailyUsage {
   user User @relation("UserAssistantDailyUsage", fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, day])
+}
+
+enum AssistantActionStatus {
+  PENDING
+  EXECUTED
+  CANCELLED
+  FAILED
+  EXPIRED
+}
+
+// A change the assistant proposed on a user's behalf. The model never writes
+// directly: it can only create a PENDING row, and the change happens when the
+// user confirms it from the chat. Rows are kept afterwards as the audit trail
+// of everything the assistant did, and to whom.
+model AssistantAction {
+  id             String                @id @default(cuid())
+  userId         String
+  conversationId String?
+  tool           String
+  // Resolved arguments (ids, not names), so executing never re-guesses
+  args           Json
+  // What the confirmation card shows: { title, details: [{ label, value }] }
+  preview        Json
+  status         AssistantActionStatus @default(PENDING)
+  result         Json?
+  error          String?
+  createdAt      DateTime              @default(now())
+  decidedAt      DateTime?
+
+  user User @relation("UserAssistantActions", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status])
 }
 
 // === NEXTAUTH MODELS ===

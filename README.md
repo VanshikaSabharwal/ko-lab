@@ -136,6 +136,24 @@ GIT_SERVICE_URL=http://localhost:8080
 GIT_SERVICE_SECRET=your-secret-key
 ```
 
+### Find fix (SearchApi)
+
+The code editor's AI Assistant has a **Fix error** tab. When you click **Find fix** on a syntax error, a failed run, or a pasted terminal error, Ko-Lab searches the web for the error with [SearchApi](https://www.searchapi.io/) <!-- TODO: replace with the tracked SearchApi link -->. Groq then writes a short fix based on the top results and the code around the error.
+
+1. Create a SearchApi account and copy your API key from the dashboard. The free plan includes about 100 searches per month.
+2. Create a free [Upstash Redis](https://console.upstash.com/) database and copy its REST URL and token. Ko-Lab keeps the per-user limit, the monthly cap and the 24-hour result cache in Redis, because Vercel can serve each request from a different instance.
+3. Add these to `apps/web/.env` and to your Vercel project settings:
+
+```bash
+SEARCHAPI_KEY=your-searchapi-key
+FIX_SEARCH_LIMIT_PER_HOUR=5     # Find fix clicks per user per hour
+FIX_SEARCH_MONTHLY_CAP=90       # SearchApi calls per month, across all users
+UPSTASH_REDIS_REST_URL=https://your-db.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your-token
+```
+
+Before anything is sent to SearchApi or Groq, secrets in errors and code are redacted: connection-string passwords, API keys, tokens, JWTs and `.env` values. SearchApi only receives the cleaned error message, never your code. If `SEARCHAPI_KEY` is unset or the monthly cap is reached, Find fix still gives an AI-only answer. In local development without Upstash, the limits are kept in memory.
+
 ### Install & Run
 
 ```bash

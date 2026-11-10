@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
-import { ExternalLink, Loader2, Play, Square, Trash2, X } from "lucide-react";
+import { ExternalLink, Loader2, Play, Square, Trash2, Wrench, X } from "lucide-react";
+import { extractRunError } from "../../../../lib/findFix";
 import { cn } from "../../../../lib/utils";
 import type { CodeRunState, OutputStream } from "../../../../lib/codeRunner/useCodeRunner";
 import {
@@ -56,6 +57,8 @@ interface OutputPanelProps {
   onClose: () => void;
   /** Console output coming from the HTML preview iframe. */
   onPreviewConsole: (stream: OutputStream, text: string) => void;
+  /** Shown when the run failed: searches for a fix to its error. */
+  onFindFix?: () => void;
 }
 
 export default function OutputPanel({
@@ -65,6 +68,7 @@ export default function OutputPanel({
   onClear,
   onClose,
   onPreviewConsole,
+  onFindFix,
 }: OutputPanelProps) {
   const [height, setHeight] = useState(DEFAULT_HEIGHT);
   const [tab, setTab] = useState<"output" | "preview">("output");
@@ -73,6 +77,7 @@ export default function OutputPanel({
   const stickToBottom = useRef(true);
 
   const busy = state.phase === "preparing" || state.phase === "running";
+  const runFailed = !busy && extractRunError(state.chunks, state.end) !== null;
   const hasPreview = state.previewHtml !== null;
   const entryName = state.entry?.split("/").pop() ?? "";
 
@@ -167,6 +172,16 @@ export default function OutputPanel({
         )}
 
         <div className="ml-auto flex shrink-0 items-center gap-1">
+          {runFailed && onFindFix && (
+            <button
+              onClick={onFindFix}
+              title="Search the web and ask AI how to fix this error"
+              className="flex items-center gap-1 rounded bg-purple-600 px-2 py-1 font-medium text-white hover:bg-purple-500"
+            >
+              <Wrench size={11} />
+              Find fix
+            </button>
+          )}
           {busy ? (
             <button
               onClick={onStop}

@@ -46,16 +46,17 @@ Ranked by severity. Check items off as they're fixed.
 
 ## 🟠 Correctness / hygiene
 
-### 4. Prisma schema change with no migration
-- [ ] Uncommitted `apps/web/prisma/schema.prisma` adds the `WorkspaceBoard` model, but the latest migration is still `20260329_add_isread_to_messages`.
+### 4. Prisma schema change with no migration — ✅ FIXED
+- [x] `WorkspaceBoard` is now created by the `00000000000000_baseline` migration (verified 2026-10-23).
+- Original issue: uncommitted `apps/web/prisma/schema.prisma` adds the `WorkspaceBoard` model, but the latest migration is still `20260329_add_isread_to_messages`.
 - If the local DB was updated via `prisma db push`, anyone else pulling the branch (or prod) won't have the table.
 - **Fix:** run `npx prisma migrate dev` and commit the migration alongside the schema.
 
 ### 5. Root `package.json` dependency problems
 - [x] `"crypto": "^1.0.1"` — this is a **deprecated placeholder npm package**, not Node's built-in `crypto`. Removed (2026-10-08).
-- [ ] App-level deps living at the monorepo root: `framer-motion`, `lucide-react`, `embla-carousel-react`, `js-cookie`, `shepherd.js`, `react-icons`, `react-hot-toast` — move to the app that uses them.
+- [x] App-level deps living at the monorepo root: `framer-motion`, `lucide-react`, `embla-carousel-react`, `js-cookie`, `shepherd.js`, `react-icons`, `react-hot-toast` — move to the app that uses them. Root `dependencies` removed entirely (2026-10-23): each lives in `apps/web` and/or `packages/ui` (which now declares `lucide-react`, `js-cookie`, `uuid`, and `next`/`next-auth` as peers). `embla-carousel-react` was unused and dropped.
 - [x] Both `octokit` **and** `@octokit/rest` are installed — pick one. Kept `@octokit/rest` (the only one imported); removed `octokit` (2026-10-08).
-- [ ] Version skew: `prisma`/`@prisma/client` ^5.19.1 at root vs ^5.20.0 in apps/web; `next-auth` duplicated at root and app level.
+- [x] Version skew: `prisma`/`@prisma/client` ^5.19.1 at root vs ^5.20.0 in apps/web; `next-auth` duplicated at root and app level. Root copies removed and `apps/web-socket` bumped to ^5.20.0 (2026-10-23).
 
 ### 6. `packages/db` is an empty husk
 - [x] Contains only `node_modules` — no source, no schema. Folder deleted (2026-10-08).
@@ -79,8 +80,9 @@ Ranked by severity. Check items off as they're fixed.
 - [ ] `ko-lab-call-system-v1.json` claims `call_missed` is "not yet implemented server-side" — it now is (`apps/web-socket/src/index.ts`). Doc is out of date.
 - Calls themselves appear complete.
 
-### 9. Workspace feature exists only in the working tree
-- All four boards (mind map, planning, DB schema, UI design), WS sync, API route, schema change, and the GroupChat menu link are **uncommitted**.
+### 9. Workspace feature exists only in the working tree — ✅ RESOLVED
+- Workspace boards, API routes and schema are committed; the migration is in the baseline (verified 2026-10-23). Root `package-lock.json` is tracked.
+- Original issue: all four boards (mind map, planning, DB schema, UI design), WS sync, API route, schema change, and the GroupChat menu link are **uncommitted**.
 - Looks feature-complete against `workspaces-config-v1.json`. Blockers before committing:
   - [ ] #4 (missing migration)
   - [ ] ideally #1 (its API trusts client-supplied `userId`)
@@ -88,7 +90,8 @@ Ranked by severity. Check items off as they're fixed.
 
 ### 10. Root-level clutter & duplicate routes
 - [x] Design docs at repo root (`code-editor-improvements-v1.json`, `ko-lab-call-system-v1.json`, `voice-and-videocall-features.md`) — two are already partly wrong (see #8). Moved to `docs/` with the other design notes (2026-10-08); their contents are unchanged, so the stale parts in #8 still apply.
-- [ ] `apps/web/app/chat-room/page.tsx` is a thin wrapper around `<Chats />` while a separate `chat/[chatId]` route exists — check whether both are needed.
+- [x] Dead `apps/web/app/components/Group-Chat.tsx` deleted (2026-10-23).
+- [x] Both are needed (checked 2026-10-23): `/chat-room` is the DM inbox (sign-in and guest mode land there), `/chat/[chatId]` is a single conversation opened from it. Original note: `apps/web/app/chat-room/page.tsx` is a thin wrapper around `<Chats />` while a separate `chat/[chatId]` route exists — check whether both are needed.
 
 ---
 

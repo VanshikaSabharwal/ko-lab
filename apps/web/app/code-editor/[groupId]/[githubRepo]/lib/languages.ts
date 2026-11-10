@@ -20,7 +20,9 @@ const yaml: Loader = () => import("@codemirror/lang-yaml").then((m) => m.yaml())
 const cpp: Loader = () => import("@codemirror/lang-cpp").then((m) => m.cpp());
 
 const LOADERS: Record<string, Loader> = {
-  ".js": javascript(),
+  // JSX on: plenty of React projects keep components in .js files, and the
+  // syntax linter would flag every tag as an error otherwise
+  ".js": javascript({ jsx: true }),
   ".jsx": javascript({ jsx: true }),
   ".ts": javascript({ typescript: true }),
   ".tsx": javascript({ jsx: true, typescript: true }),

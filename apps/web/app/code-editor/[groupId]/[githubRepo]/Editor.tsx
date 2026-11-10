@@ -3,7 +3,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Prec } from "@codemirror/state";
 import { keymap } from "@codemirror/view";
-import { hasLinter } from "./lib/fileTypes";
+import { getLanguageLabel, hasJsonLinter, hasLinter, hasSyntaxLinter } from "./lib/fileTypes";
+import { syntaxDiagnostics } from "./lib/syntaxLint";
+import { useFindFix } from "./lib/useFindFix";
+import { errorLineFor, extractRunError, snippetAround } from "../../../lib/findFix";
 import { useFileLanguage } from "./lib/languages";
 import CodeMirror from "@uiw/react-codemirror";
 import { linter, lintGutter, type Diagnostic } from "@codemirror/lint";
@@ -15,7 +18,7 @@ import IdeShell, { type IdeSection } from "./components/IdeShell";
 import EditorTabs from "./components/EditorTabs";
 import EditorBreadcrumb from "./components/EditorBreadcrumb";
 import EditorStatusBar from "./components/EditorStatusBar";
-import AiAssistantPanel from "./components/AiAssistantPanel";
+import AiAssistantPanel, { type AssistantTab, type LintError } from "./components/AiAssistantPanel";
 import CollaborationPanel from "./components/CollaborationPanel";
 import TrashPanel, { type TrashItem } from "./components/TrashPanel";
 import OutputPanel from "./components/OutputPanel";
@@ -58,6 +61,10 @@ interface CodeProps {
 // Kept at module scope: a new value each render makes CodeMirror rebuild its
 // whole configuration on every keystroke.
 const LINT_GUTTER = lintGutter();
+
+const AI_WIDTH_KEY = "ko-lab:ai-panel-width";
+const AI_DEFAULT_WIDTH = 320;
+const AI_MIN_WIDTH = 280;
 
 /** How long typing has to pause before an auto-save. */
 const AUTO_SAVE_DELAY_MS = 1500;
@@ -224,6 +231,47 @@ export default function Editor({ github, group }: CodeProps) {
   const [aiOpen, setAiOpen] = useState(false);
   // Docked-panel collapse (desktop only); the mobile sheet uses aiOpen.
   const [aiCollapsed, setAiCollapsed] = useState(false);
+  // Docked panel width, dragged from its left edge; remembered per browser
+  const [aiWidth, setAiWidth] = useState(AI_DEFAULT_WIDTH);
+  useEffect(() => {
+    try {
+      const stored = Number(localStorage.getItem(AI_WIDTH_KEY));
+      if (stored >= AI_MIN_WIDTH) setAiWidth(stored);
+    } catch {
+      // Storage blocked: keep the default
+    }
+  }, []);
+  const startAiResize = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = aiWidth;
+    // Leave room for the editor itself
+    const max = Math.max(AI_MIN_WIDTH, Math.round(window.innerWidth * 0.6));
+    let latest = startWidth;
+    const prevCursor = document.body.style.cursor;
+    const prevSelect = document.body.style.userSelect;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+
+    const onMove = (ev: PointerEvent) => {
+      // Dragging left (smaller x) widens the panel
+      latest = Math.min(max, Math.max(AI_MIN_WIDTH, startWidth + (startX - ev.clientX)));
+      setAiWidth(latest);
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      document.body.style.cursor = prevCursor;
+      document.body.style.userSelect = prevSelect;
+      try {
+        localStorage.setItem(AI_WIDTH_KEY, String(latest));
+      } catch {
+        // Width just won't be remembered
+      }
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
   // Paths staged for deletion — struck through in the tree until the change
   // request is merged, at which point the file is actually removed.
   const [deletedPaths, setDeletedPaths] = useState<Set<string>>(new Set());
@@ -239,6 +287,11 @@ export default function Editor({ github, group }: CodeProps) {
     errors: 0,
     warnings: 0,
   });
+  // The errors themselves, for the assistant's "Find fix" list
+  const [lintErrors, setLintErrors] = useState<LintError[]>([]);
+  useEffect(() => setLintErrors([]), [fileName]);
+  const [aiTab, setAiTab] = useState<AssistantTab>("tools");
+  const { state: fixState, findFix, cancel: cancelFix } = useFindFix();
   const [reconnecting, setReconnecting] = useState(false);
 
   const handleReconnectGithub = async () => {
@@ -338,13 +391,16 @@ export default function Editor({ github, group }: CodeProps) {
 
   const router = useRouter();
 
-  // Only JSON has an in-browser linter today. The status bar shows "—" for
-  // everything else rather than a 0 that would imply a clean check.
+  // JSON is parsed for real; JS/TS get syntax errors from the parse tree.
+  // The status bar shows "—" for everything else rather than a 0 that would
+  // imply a clean check.
   const lintExtension = useMemo(
     () =>
       linter((view): Diagnostic[] => {
-        const found: Diagnostic[] = [];
-        if (hasLinter(fileName)) {
+        let found: Diagnostic[] = [];
+        if (hasSyntaxLinter(fileName)) {
+          found = syntaxDiagnostics(view.state);
+        } else if (hasJsonLinter(fileName)) {
           const text = view.state.doc.toString();
           if (text.trim()) {
             try {
@@ -361,6 +417,15 @@ export default function Editor({ github, group }: CodeProps) {
           errors: found.filter((d) => d.severity === "error").length,
           warnings: found.filter((d) => d.severity === "warning").length,
         });
+        const next = found
+          .filter((d) => d.severity === "error")
+          .map((d) => ({ line: view.state.doc.lineAt(d.from).number, message: d.message }));
+        setLintErrors((prev) =>
+          prev.length === next.length &&
+          prev.every((p, i) => p.line === next[i]!.line && p.message === next[i]!.message)
+            ? prev
+            : next,
+        );
         return found;
       }),
     [fileName],
@@ -1224,6 +1289,73 @@ export default function Editor({ github, group }: CodeProps) {
   const runLanguage = fileNotice ? null : getRunLanguage(filePath);
   const runnerBusy = runState.phase === "preparing" || runState.phase === "running";
 
+  // ── Find fix (SearchApi + Groq) ──────────────────────────────────────────
+  const showFixTab = useCallback(() => {
+    setAiTab("fix");
+    setAiCollapsed(false);
+    // The docked panel is desktop-only; phones get the sheet
+    if (typeof window !== "undefined" && window.innerWidth < 1024) setAiOpen(true);
+  }, []);
+
+  /** Code around the error; the server redacts secrets before sending it on. */
+  const snippetFor = useCallback(
+    (error: string, line: number | null) =>
+      fileContent ? snippetAround(fileContent, line ?? 1, 10) : undefined,
+    [fileContent],
+  );
+
+  const findLintFix = useCallback(
+    (e: LintError) => {
+      void findFix({
+        error: e.message,
+        language: getLanguageLabel(activeFileName),
+        snippet: snippetFor(e.message, e.line),
+        source: "lint",
+      });
+    },
+    [findFix, activeFileName, snippetFor],
+  );
+
+  const findManualFix = useCallback(
+    (text: string) => {
+      if (!text) return;
+      void findFix({
+        error: text.slice(0, 2000),
+        language: getLanguageLabel(activeFileName),
+        snippet: snippetFor(text, errorLineFor(text, activeFileName)),
+        source: "manual",
+      });
+    },
+    [findFix, activeFileName, snippetFor],
+  );
+
+  const findRunFix = useCallback(() => {
+    const error = extractRunError(runState.chunks, runState.end);
+    if (!error) return;
+    const entryName = runState.entry?.split("/").pop() ?? "";
+    // Only the open file's text is at hand; skip the snippet if the run was another file
+    const sameFile = runState.entry === filePath;
+    showFixTab();
+    void findFix({
+      error,
+      language: getLanguageLabel(entryName || activeFileName),
+      snippet: sameFile ? snippetFor(error, errorLineFor(error, entryName)) : undefined,
+      source: "run",
+    });
+  }, [runState, filePath, activeFileName, findFix, showFixTab, snippetFor]);
+
+  const fixPanelProps = {
+    tab: aiTab,
+    onTabChange: setAiTab,
+    lintErrors,
+    lintAvailable: !!fileName && hasLinter(fileName) && !heavyFile && !sizeReadOnly,
+    syntaxOnly: hasSyntaxLinter(fileName),
+    fix: fixState,
+    onFindLintFix: findLintFix,
+    onFindManualFix: findManualFix,
+    onCancelFix: cancelFix,
+  };
+
   /** Text of another repo file for the runner: the tab cache first, then the server. */
   const readRepoText = useCallback(
     async (path: string): Promise<string | null> => {
@@ -1811,6 +1943,7 @@ export default function Editor({ github, group }: CodeProps) {
               setOutputOpen(false);
             }}
             onPreviewConsole={appendOutput}
+            onFindFix={findRunFix}
           />
         )}
 
@@ -1923,11 +2056,29 @@ export default function Editor({ github, group }: CodeProps) {
           </button>
         </div>
       ) : (
-        <div className="hidden h-full w-80 shrink-0 lg:block">
+        <div style={{ width: aiWidth }} className="relative hidden h-full shrink-0 lg:block">
+          {/* Drag the left edge to widen the panel; double-click to reset */}
+          <div
+            onPointerDown={startAiResize}
+            onDoubleClick={() => {
+              setAiWidth(AI_DEFAULT_WIDTH);
+              try {
+                localStorage.removeItem(AI_WIDTH_KEY);
+              } catch {
+                // Nothing stored
+              }
+            }}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize AI assistant"
+            title="Drag to resize · double-click to reset"
+            className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize hover:bg-purple-500/40 active:bg-purple-500/60"
+          />
           <AiAssistantPanel
             onGenerateReadme={handleGenerateReadme}
             generatingReadme={generatingReadme}
             onCollapse={() => setAiCollapsed(true)}
+            {...fixPanelProps}
           />
         </div>
       )}
@@ -1939,6 +2090,7 @@ export default function Editor({ github, group }: CodeProps) {
               onClose={() => setAiOpen(false)}
               onGenerateReadme={handleGenerateReadme}
               generatingReadme={generatingReadme}
+              {...fixPanelProps}
             />
           </div>
         </div>

@@ -210,10 +210,20 @@ const NotificationsPage = () => {
                           not in the group — sending them to the group would be
                           a dead end. */}
                       <Link
-                        href={n.type === "CODE_ACCESS" ? "/profile" : `/group/${n.groupId}`}
+                        href={
+                          n.type === "CODE_ACCESS"
+                            ? "/profile"
+                            : n.type === "TASK_ASSIGNED"
+                              ? `/workspace/${n.groupId}/planning`
+                              : `/group/${n.groupId}`
+                        }
                         className="text-xs font-medium text-blue-500 hover:underline flex-shrink-0"
                       >
-                        {n.type === "CODE_ACCESS" ? "Go to profile →" : "Open group →"}
+                        {n.type === "CODE_ACCESS"
+                          ? "Go to profile →"
+                          : n.type === "TASK_ASSIGNED"
+                            ? "Open board →"
+                            : "Open group →"}
                       </Link>
                     </li>
                   ))}

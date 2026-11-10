@@ -309,7 +309,9 @@ const GroupChat: React.FC<GroupChatProps> = ({ group }) => {
           // workspace/presence traffic share this socket, and appending those
           // rendered empty bubbles stamped "Invalid Date" — they carry no
           // content or createdAt. CallProvider handles them separately.
-          if (message.type || !message.content) return;
+          // "group_message" is a message written server-side (e.g. posted by
+          // the assistant) and pushed over /internal/push, which needs a type.
+          if ((message.type && message.type !== "group_message") || !message.content) return;
           // Direct messages are delivered to every socket a user has, this one
           // included; only this group's messages belong in its transcript.
           if (message.groupId !== group) return;
